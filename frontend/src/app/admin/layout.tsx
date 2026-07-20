@@ -1,20 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, ElementType } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import {
+  LayoutDashboard,
+  Building2,
+  Star,
+  CreditCard,
+  BarChart3,
+  Users,
+  Shield,
+  Activity,
+  Settings,
+  Menu,
+  X,
+  LogOut,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 
-const nav = [
-  { href: '/admin', label: 'لوحة التحكم', icon: '📊' },
-  { href: '/admin/subscribers', label: 'المشتركون', icon: '🏢' },
-  { href: '/admin/plans', label: 'الباقات', icon: '⭐' },
-  { href: '/admin/payments', label: 'المدفوعات', icon: '💳' },
-  { href: '/admin/reports', label: 'التقارير', icon: '📈' },
-  { href: '/admin/users', label: 'المستخدمون', icon: '👥' },
-  { href: '/admin/staff', label: 'أدمن المنصة', icon: '🛡️' },
-  { href: '/admin/activity', label: 'النشاط', icon: '📨' },
-  { href: '/admin/settings', label: 'إعدادات المنصة', icon: '🔧' },
+const nav: Array<{ href: string; label: string; icon: ElementType }> = [
+  { href: '/admin', label: 'لوحة التحكم', icon: LayoutDashboard },
+  { href: '/admin/subscribers', label: 'المشتركون', icon: Building2 },
+  { href: '/admin/plans', label: 'الباقات', icon: Star },
+  { href: '/admin/payments', label: 'المدفوعات', icon: CreditCard },
+  { href: '/admin/reports', label: 'التقارير', icon: BarChart3 },
+  { href: '/admin/users', label: 'المستخدمون', icon: Users },
+  { href: '/admin/staff', label: 'أدمن المنصة', icon: Shield },
+  { href: '/admin/activity', label: 'النشاط', icon: Activity },
+  { href: '/admin/settings', label: 'إعدادات المنصة', icon: Settings },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -67,7 +81,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
         >
-          {menuOpen ? '✕' : '☰'}
+          {menuOpen ? <X size={18} strokeWidth={2.4} /> : <Menu size={18} strokeWidth={2.4} />}
         </button>
         <div className="min-w-0 flex-1 text-center">
           <p className="font-display font-black text-[var(--teal-dark)] text-sm truncate">
@@ -92,7 +106,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               ◆ BusinessOS <span className="text-[var(--orange)]">AI</span>
             </div>
             <button type="button" className="app-menu-btn lg:hidden" aria-label="إغلاق" onClick={() => setMenuOpen(false)}>
-              ✕
+              <X size={16} strokeWidth={2.4} />
             </button>
           </div>
           <p className="text-xs text-[var(--muted)] mt-1">لوحة أدمن المنصة</p>
@@ -102,6 +116,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto overscroll-contain">
           {nav.map((item) => {
             const active = pathname === item.href || (item.href !== '/admin' && pathname.startsWith(item.href));
+            const Icon = item.icon;
             return (
               <Link
                 key={item.href}
@@ -110,7 +125,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   active ? 'nav-active' : 'text-[var(--muted)] hover:bg-[var(--teal-soft)]/50'
                 }`}
               >
-                <span className="shrink-0" aria-hidden>{item.icon}</span>
+                <span className={`nav-icon ${active ? 'is-active' : ''}`} aria-hidden>
+                  <Icon size={18} strokeWidth={2.15} />
+                </span>
                 <span className="truncate">{item.label}</span>
               </Link>
             );
@@ -130,8 +147,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <button
             type="button"
             onClick={logout}
-            className="w-full text-sm font-bold text-[var(--orange)] hover:bg-[var(--orange-soft)] py-2 rounded-xl transition"
+            className="w-full text-sm font-bold text-[var(--orange)] hover:bg-[var(--orange-soft)] py-2 rounded-xl transition inline-flex items-center justify-center gap-2"
           >
+            <LogOut size={15} strokeWidth={2.3} />
             تسجيل الخروج
           </button>
         </div>

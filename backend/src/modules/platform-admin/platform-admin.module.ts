@@ -19,6 +19,7 @@ import {
 import { PlansModule } from '../plans/plans.module';
 import { PlanEntitlementsModule } from '../../common/services/plan-entitlements.module';
 import { AuthModule } from '../auth/auth.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AuthModule } from '../auth/auth.module';
     PlansModule,
     PlanEntitlementsModule,
     AuthModule,
+    AiModule,
   ],
   controllers: [PlatformAdminController],
   providers: [PlatformAdminService],

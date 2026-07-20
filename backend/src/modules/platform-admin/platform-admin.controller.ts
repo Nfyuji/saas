@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { PlatformAdminService } from './platform-admin.service';
+import { AiService } from '../ai/ai.service';
 import { JwtAuthGuard, RolesGuard } from '../../common/guards/auth.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import {
@@ -70,12 +71,29 @@ class PlanDto {
 class TogglePlanDto {
   @IsString() field!: 'isActive' | 'visibleToCustomers' | 'popular';
 }
+class AiKeysDto {
+  @IsOptional() @IsString() aiProvider?: string;
+  @IsOptional() @IsString() openaiApiKey?: string;
+  @IsOptional() @IsString() openaiModel?: string;
+  @IsOptional() @IsString() geminiApiKey?: string;
+  @IsOptional() @IsString() geminiModel?: string;
+  @IsOptional() @IsNumber() openaiMonthlyTokenBudget?: number;
+  @IsOptional() @IsNumber() geminiMonthlyTokenBudget?: number;
+  @IsOptional() @IsBoolean() aiEnabled?: boolean;
+  @IsOptional() @IsBoolean() resetUsage?: boolean;
+}
+class AiTestDto {
+  @IsString() provider!: string;
+}
 
 @Controller('platform-admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('super_admin', 'platform_support', 'platform_finance')
 export class PlatformAdminController {
-  constructor(private platformAdminService: PlatformAdminService) {}
+  constructor(
+    private platformAdminService: PlatformAdminService,
+    private aiService: AiService,
+  ) {}
 
   @Get('overview')
   overview() {
@@ -181,6 +199,25 @@ export class PlatformAdminController {
   @Roles('super_admin')
   updateSettings(@Body() body: Record<string, unknown>) {
     return this.platformAdminService.updateSettings(body);
+  }
+
+  @Get('ai-keys')
+  @Roles('super_admin')
+  getAiKeys() {
+    return this.aiService.getAdminAiStatus();
+  }
+
+  @Put('ai-keys')
+  @Roles('super_admin')
+  updateAiKeys(@Body() dto: AiKeysDto) {
+    return this.aiService.updateAdminAiKeys(dto);
+  }
+
+  @Post('ai-keys/test')
+  @Roles('super_admin')
+  testAiKey(@Body() dto: AiTestDto) {
+    const provider = dto.provider === 'gemini' ? 'gemini' : 'openai';
+    return this.aiService.testProvider(provider);
   }
 
   // Subscribers

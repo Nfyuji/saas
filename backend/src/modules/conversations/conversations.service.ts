@@ -84,4 +84,14 @@ export class ConversationsService {
     if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
     return conversation;
   }
+
+  async setAiPaused(companyId: string, id: string, aiPaused: boolean) {
+    const conversation = await this.conversationModel.findOneAndUpdate(
+      { _id: id, companyId: new Types.ObjectId(companyId) },
+      { aiPaused: !!aiPaused, ...(aiPaused ? { aiHandled: false } : {}) },
+      { new: true },
+    );
+    if (!conversation) throw new NotFoundException('المحادثة غير موجودة');
+    return conversation;
+  }
 }

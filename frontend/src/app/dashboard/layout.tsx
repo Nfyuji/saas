@@ -24,6 +24,13 @@ import {
   Activity,
   UserRound,
   Megaphone,
+  Sparkles,
+  Share2,
+  Target,
+  TrendingUp,
+  Crown,
+  Clock,
+  BarChart3,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -37,6 +44,15 @@ interface UsageDash {
   alerts: Array<{ type: 'warn' | 'danger' | 'info'; code: string; text: string; href?: string }>;
 }
 
+interface AppNotification {
+  _id: string;
+  title: string;
+  body: string;
+  level: string;
+  href?: string;
+  read: boolean;
+}
+
 const allNav: Array<{
   href: string;
   label: string;
@@ -44,19 +60,26 @@ const allNav: Array<{
   feature?: 'opportunitiesEnabled' | 'invoicesEnabled' | 'knowledgeEnabled';
 }> = [
   { href: '/dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
-  { href: '/dashboard/inbox', label: 'صندوق الرسائل', icon: MessageCircle },
+  { href: '/dashboard/executive', label: 'تنفيذية يومية', icon: Crown },
+  { href: '/dashboard/inbox', label: 'صندوق موحّد', icon: MessageCircle },
+  { href: '/dashboard/followups', label: 'المتابعات', icon: Clock },
+  { href: '/dashboard/reports', label: 'التقارير', icon: BarChart3 },
+  { href: '/dashboard/social', label: 'حسابات التواصل', icon: Share2 },
+  { href: '/dashboard/content', label: 'محتوى وإعلانات AI', icon: Sparkles },
+  { href: '/dashboard/campaigns', label: 'الحملات', icon: Megaphone },
+  { href: '/dashboard/competitors', label: 'تحليل المنافسين', icon: Target },
+  { href: '/dashboard/forecast', label: 'تنبؤ المبيعات', icon: TrendingUp },
   { href: '/dashboard/opportunities', label: 'الفرص الضائعة', icon: Flame, feature: 'opportunitiesEnabled' },
   { href: '/dashboard/deals', label: 'الصفقات', icon: Handshake },
   { href: '/dashboard/invoices', label: 'الفواتير', icon: Receipt, feature: 'invoicesEnabled' },
-  { href: '/dashboard/customers', label: 'العملاء', icon: Users },
-  { href: '/dashboard/knowledge', label: 'قاعدة المعرفة', icon: BookOpen, feature: 'knowledgeEnabled' },
-  { href: '/dashboard/automations', label: 'الأتمتة', icon: Workflow },
-  { href: '/dashboard/campaigns', label: 'الحملات', icon: Megaphone },
+  { href: '/dashboard/customers', label: 'CRM العملاء', icon: Users },
+  { href: '/dashboard/knowledge', label: 'RAG المعرفة', icon: BookOpen, feature: 'knowledgeEnabled' },
+  { href: '/dashboard/automations', label: 'أتمتة AI', icon: Workflow },
   { href: '/dashboard/billing', label: 'الاشتراك', icon: CreditCard },
   { href: '/dashboard/usage', label: 'استخدام الباقة', icon: Activity },
   { href: '/dashboard/team', label: 'الفريق', icon: UsersRound },
   { href: '/dashboard/webhooks', label: 'Webhooks', icon: Webhook },
-  { href: '/dashboard/whatsapp', label: 'إعدادات واتساب', icon: Smartphone },
+  { href: '/dashboard/whatsapp', label: 'واتساب / الوكيل', icon: Smartphone },
   { href: '/dashboard/profile', label: 'الملف الشخصي', icon: UserRound },
   { href: '/dashboard/settings', label: 'الإعدادات', icon: Settings },
 ];
@@ -68,6 +91,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [menuOpen, setMenuOpen] = useState(false);
   const [usage, setUsage] = useState<UsageDash | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   useEffect(() => {
     if (!loading && !user) router.push('/login');
@@ -80,8 +104,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       .get<UsageDash>('/billing/usage')
       .then(setUsage)
       .catch(() => setUsage(null));
+    api
+      .get<AppNotification[]>('/notifications?limit=20')
+      .then(setNotifications)
+      .catch(() => setNotifications([]));
     const t = setInterval(() => {
       api.get<UsageDash>('/billing/usage').then(setUsage).catch(() => undefined);
+      api.get<AppNotification[]>('/notifications?limit=20').then(setNotifications).catch(() => undefined);
     }, 60_000);
     return () => clearInterval(t);
   }, [user]);
@@ -128,7 +157,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     msgMeter?.percent ??
     (msgLimit != null && msgLimit > 0 ? Math.min(100, Math.round((msgUsed / msgLimit) * 100)) : null);
   const alerts = usage?.alerts || [];
-  const alertCount = alerts.length;
+  const unreadNotes = notifications.filter((n) => !n.read);
+  const alertCount = alerts.length + unreadNotes.length;
+
+  const markNotesRead = () => {
+    api.put('/notifications/read-all').then(() => {
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    }).catch(() => undefined);
+  };
 
   return (
     <div className="app-frame">
@@ -179,11 +215,40 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
           {alertsOpen && (
             <div className="alerts-panel" role="menu">
-              <p className="text-xs font-bold text-[var(--muted)] mb-2">تنبيهات التشغيل</p>
-              {alerts.length === 0 ? (
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-bold text-[var(--muted)] m-0">تنبيهات التشغيل</p>
+                {unreadNotes.length > 0 && (
+                  <button type="button" className="text-[10px] text-[var(--teal)] font-bold" onClick={markNotesRead}>
+                    تعليم الكل مقروء
+                  </button>
+                )}
+              </div>
+              {alerts.length === 0 && notifications.length === 0 ? (
                 <p className="text-sm text-[var(--muted)]">لا تنبيهات الآن</p>
               ) : (
                 <ul className="space-y-2">
+                  {unreadNotes.slice(0, 8).map((n) => (
+                    <li key={n._id}>
+                      {n.href ? (
+                        <Link
+                          href={n.href}
+                          className={`alerts-item type-${n.level === 'danger' ? 'danger' : n.level === 'warn' ? 'warn' : 'info'}`}
+                          onClick={() => {
+                            api.put(`/notifications/${n._id}/read`).catch(() => undefined);
+                            setAlertsOpen(false);
+                          }}
+                        >
+                          <strong className="block">{n.title}</strong>
+                          <span className="text-xs opacity-80">{n.body}</span>
+                        </Link>
+                      ) : (
+                        <span className={`alerts-item type-${n.level === 'danger' ? 'danger' : 'info'}`}>
+                          <strong className="block">{n.title}</strong>
+                          <span className="text-xs opacity-80">{n.body}</span>
+                        </span>
+                      )}
+                    </li>
+                  ))}
                   {alerts.map((a) => (
                     <li key={a.code}>
                       {a.href ? (

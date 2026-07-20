@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+﻿import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Company, CompanyDocument } from '../../schemas/company.schema';
@@ -7,6 +7,7 @@ import {
   SubscriptionAlert,
   SubscriptionAlertDocument,
 } from '../../schemas/subscription-alert.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class SubscriptionAlertsService implements OnModuleDestroy {
@@ -18,11 +19,11 @@ export class SubscriptionAlertsService implements OnModuleDestroy {
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(SubscriptionAlert.name)
     private alertModel: Model<SubscriptionAlertDocument>,
+    private notifications: NotificationsService,
   ) {
     this.timer = setInterval(() => {
       this.runChecks().catch((e) => this.logger.error(e));
     }, 60_000);
-    // أول تشغيل بعد دقيقة من الإقلاع
     setTimeout(() => this.runChecks().catch((e) => this.logger.error(e)), 15_000);
   }
 
@@ -53,7 +54,6 @@ export class SubscriptionAlertsService implements OnModuleDestroy {
 
     for (const c of expired) {
       await this.sendOnce(c, 'expired', 'انتهى الاشتراك — تم تقييد الدخول حتى التجديد');
-      // لا نوقف تلقائياً هنا إذا رغب الأدمن بالتمديد؛ الـ login يمنع الدخول بالفعل
     }
   }
 
@@ -89,5 +89,15 @@ export class SubscriptionAlertsService implements OnModuleDestroy {
         note,
       });
     }
+
+    await this.notifications.create({
+      companyId: company._id.toString(),
+      title: type === 'expired' ? 'انتهى الاشتراك' : 'اشتراكك ينتهي قريباً',
+      body: note,
+      level: type === 'expired' ? 'danger' : 'warn',
+      category: 'billing',
+      href: '/dashboard/billing',
+      meta: { code: type },
+    });
   }
 }

@@ -8,6 +8,7 @@ import { api } from '@/lib/api';
 interface WhatsAppStatus {
   configured: boolean;
   demo?: boolean;
+  provider?: 'meta' | 'greenapi' | 'demo' | null;
   displayPhoneNumber?: string;
   verifiedName?: string;
   phoneNumberId?: string;
@@ -18,6 +19,7 @@ interface WhatsAppStatus {
   aiAutoReply?: boolean;
   welcomeMessage?: string;
   webhookUrl?: string;
+  greenWebhookUrl?: string;
   verifyToken?: string;
   apiVersion?: string;
   metaAppSetupUrl?: string;
@@ -27,6 +29,15 @@ interface WhatsAppStatus {
     appId: string;
     configId: string;
     loginUrl?: string;
+  };
+  greenApi?: {
+    configured?: boolean;
+    apiUrl?: string;
+    mediaUrl?: string;
+    idInstance?: string;
+    hasToken?: boolean;
+    docsUrl?: string;
+    receiveMode?: string;
   };
 }
 
@@ -52,7 +63,15 @@ export default function WhatsAppSettingsPage() {
     aiAutoReply: true,
     welcomeMessage: 'مرحباً! كيف يمكنني مساعدتك؟',
   });
+  const [greenForm, setGreenForm] = useState({
+    apiUrl: 'https://7107.api.greenapi.com',
+    mediaUrl: 'https://7107.api.greenapi.com',
+    idInstance: '',
+    apiTokenInstance: '',
+    displayPhoneNumber: '',
+  });
   const [showToken, setShowToken] = useState(false);
+  const [showGreenToken, setShowGreenToken] = useState(false);
   const [simText, setSimText] = useState('مرحباً، أريد معرفة الأسعار');
   const [testTo, setTestTo] = useState('');
   const [testText, setTestText] = useState('رسالة اختبار من BusinessOS AI ✅');
@@ -75,6 +94,13 @@ export default function WhatsAppSettingsPage() {
           businessAccountId: data.demo ? '' : data.businessAccountId || '',
           aiAutoReply: data.aiAutoReply ?? true,
           welcomeMessage: data.welcomeMessage || f.welcomeMessage,
+        }));
+        setGreenForm((g) => ({
+          ...g,
+          apiUrl: data.greenApi?.apiUrl || g.apiUrl,
+          mediaUrl: data.greenApi?.mediaUrl || g.mediaUrl,
+          idInstance: data.greenApi?.idInstance || g.idInstance,
+          displayPhoneNumber: data.provider === 'greenapi' ? data.displayPhoneNumber || '' : g.displayPhoneNumber,
         }));
         if (data.configured && !data.demo) setStep(4);
         else if (data.configured && data.demo) setStep(1);
@@ -147,6 +173,65 @@ export default function WhatsAppSettingsPage() {
       setForm((f) => ({ ...f, accessToken: '' }));
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'فشل الحفظ');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGreenTest = async () => {
+    setTesting(true);
+    setMessage('');
+    setTestOk(false);
+    try {
+      const res = await api.post<{
+        success: boolean;
+        message: string;
+        stateInstance?: string;
+        displayPhoneNumber?: string;
+      }>('/whatsapp/test-greenapi', {
+        apiUrl: greenForm.apiUrl || undefined,
+        idInstance: greenForm.idInstance || undefined,
+        apiTokenInstance: greenForm.apiTokenInstance || undefined,
+      });
+      setTestOk(true);
+      setMessage(
+        `${res.message}${res.displayPhoneNumber ? ` · ${res.displayPhoneNumber}` : ''}`,
+      );
+      if (res.displayPhoneNumber) {
+        setGreenForm((g) => ({ ...g, displayPhoneNumber: g.displayPhoneNumber || res.displayPhoneNumber || '' }));
+      }
+    } catch (err) {
+      setTestOk(false);
+      setMessage(err instanceof Error ? err.message : 'فشل اختبار Green API');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleGreenSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setMessage('');
+    try {
+      const result = await api.put<{ success: boolean; message?: string; whatsapp: WhatsAppStatus }>(
+        '/whatsapp/configure-greenapi',
+        {
+          apiUrl: greenForm.apiUrl.trim(),
+          mediaUrl: greenForm.mediaUrl.trim() || greenForm.apiUrl.trim(),
+          idInstance: greenForm.idInstance.trim(),
+          apiTokenInstance: greenForm.apiTokenInstance.trim() || undefined,
+          displayPhoneNumber: greenForm.displayPhoneNumber.trim() || undefined,
+          aiAutoReply: form.aiAutoReply,
+          welcomeMessage: form.welcomeMessage,
+        },
+      );
+      setStatus(result.whatsapp);
+      setMessage(result.message || 'تم ربط Green API');
+      setTestOk(true);
+      setStep(4);
+      setGreenForm((g) => ({ ...g, apiTokenInstance: '' }));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'فشل ربط Green API');
     } finally {
       setSaving(false);
     }
@@ -238,12 +323,15 @@ export default function WhatsAppSettingsPage() {
     <div className="page-wrap max-w-3xl space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="page-title mb-2">ربط واتساب عبر Meta</h1>
+          <h1 className="page-title mb-2">ربط واتساب</h1>
           <p className="page-sub">
-            Cloud API الرسمي — خطوات واضحة من تطبيق Meta حتى استقبال الرسائل في صندوق الوارد
+            اختر Green API أو Meta Cloud API — ثم اختبر الإرسال من الصندوق
           </p>
         </div>
-        {isLive && (
+        {isLive && status?.provider === 'greenapi' && (
+          <span className="badge badge-ok shrink-0">متصل · Green API</span>
+        )}
+        {isLive && status?.provider !== 'greenapi' && (
           <span className="badge badge-ok shrink-0">متصل بـ Meta</span>
         )}
         {status?.demo && <span className="badge badge-warn shrink-0">وضع تجريبي</span>}
@@ -252,6 +340,105 @@ export default function WhatsAppSettingsPage() {
       {message && (
         <div className={`${isError ? 'alert-err' : 'alert-ok'} whitespace-pre-wrap`}>{message}</div>
       )}
+
+      {/* Green API */}
+      <section className="surface-card p-5 sm:p-6 space-y-4 border-2 border-[var(--teal)]/30">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-xs font-bold text-[var(--orange)] m-0 mb-1">الطريقة الأسرع</p>
+            <h2 className="font-display font-extrabold text-xl text-[var(--teal-dark)] m-0">
+              ربط عبر Green API
+            </h2>
+            <p className="text-sm text-[var(--muted)] mt-1 mb-0">
+              مثيل جاهز ومرخّص — إرسال واستقبال بدون Meta Embedded Signup
+            </p>
+          </div>
+          {status?.provider === 'greenapi' && status.configured && (
+            <span className="badge badge-ok">مفعّل</span>
+          )}
+        </div>
+
+        <form onSubmit={handleGreenSave} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold mb-1">apiUrl</label>
+              <input
+                dir="ltr"
+                className="input-field"
+                value={greenForm.apiUrl}
+                onChange={(e) => setGreenForm({ ...greenForm, apiUrl: e.target.value })}
+                placeholder="https://7107.api.greenapi.com"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">mediaUrl</label>
+              <input
+                dir="ltr"
+                className="input-field"
+                value={greenForm.mediaUrl}
+                onChange={(e) => setGreenForm({ ...greenForm, mediaUrl: e.target.value })}
+                placeholder="https://7107.api.greenapi.com"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">idInstance</label>
+              <input
+                dir="ltr"
+                required
+                className="input-field"
+                value={greenForm.idInstance}
+                onChange={(e) => setGreenForm({ ...greenForm, idInstance: e.target.value })}
+                placeholder="710701675529"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold mb-1">apiTokenInstance</label>
+              <div className="flex gap-2">
+                <input
+                  dir="ltr"
+                  type={showGreenToken ? 'text' : 'password'}
+                  className="input-field flex-1"
+                  value={greenForm.apiTokenInstance}
+                  onChange={(e) => setGreenForm({ ...greenForm, apiTokenInstance: e.target.value })}
+                  placeholder={status?.greenApi?.hasToken ? 'اتركه فارغاً للإبقاء على التوكن' : 'التوكن'}
+                />
+                <button type="button" className="chip chip-soft" onClick={() => setShowGreenToken((v) => !v)}>
+                  {showGreenToken ? 'إخفاء' : 'إظهار'}
+                </button>
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold mb-1">رقم الهاتف المرتبط</label>
+              <input
+                dir="ltr"
+                className="input-field"
+                value={greenForm.displayPhoneNumber}
+                onChange={(e) => setGreenForm({ ...greenForm, displayPhoneNumber: e.target.value })}
+                placeholder="967770014732"
+              />
+            </div>
+          </div>
+
+          {status?.greenWebhookUrl && (
+            <div className="rounded-2xl bg-[var(--teal-soft)]/40 p-3 text-xs space-y-1">
+              <p className="font-bold m-0">Webhook (للإنتاج عبر إنترنت عام)</p>
+              <p className="m-0 break-all" dir="ltr">{status.greenWebhookUrl}</p>
+              <p className="text-[var(--muted)] m-0">
+                محلياً يعمل الاستقبال تلقائياً عبر Polling كل 5 ثوانٍ — لا تحتاج ngrok للاختبار.
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={testing} onClick={handleGreenTest} className="btn-ghost">
+              {testing ? 'جاري الاختبار...' : 'اختبار الاتصال'}
+            </button>
+            <button type="submit" disabled={saving} className="btn-teal">
+              {saving ? 'جاري الحفظ...' : 'حفظ وربط Green API'}
+            </button>
+          </div>
+        </form>
+      </section>
 
       {/* Primary: Facebook Embedded Signup */}
       {!isLive && (
@@ -290,7 +477,11 @@ export default function WhatsAppSettingsPage() {
           <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
             <div>
               <p className="font-semibold text-[var(--teal-dark)]">
-                {status.demo ? 'وضع تجريبي مفعّل' : 'واتساب الحقيقي مفعّل'}
+                {status.demo
+                  ? 'وضع تجريبي مفعّل'
+                  : status.provider === 'greenapi'
+                    ? 'واتساب عبر Green API'
+                    : 'واتساب الحقيقي مفعّل (Meta)'}
               </p>
               <p className="text-sm text-[var(--muted)] mt-1">
                 {status.verifiedName || '—'}
@@ -310,7 +501,7 @@ export default function WhatsAppSettingsPage() {
               )}
               {!status.demo && (
                 <button type="button" onClick={disconnect} disabled={saving} className="btn-ghost text-sm !py-2 text-[var(--orange)]">
-                  فصل Meta
+                  فصل الربط
                 </button>
               )}
             </div>

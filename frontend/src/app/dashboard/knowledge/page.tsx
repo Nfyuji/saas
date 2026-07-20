@@ -9,6 +9,7 @@ interface KnowledgeDoc {
   title: string;
   type: string;
   content: string;
+  filename?: string;
   useCount?: number;
   isActive?: boolean;
 }
@@ -25,6 +26,7 @@ export default function KnowledgePage() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState({ title: '', content: '', type: 'catalog' });
 
   const load = () => api.get<KnowledgeDoc[]>('/knowledge').then(setDocs).catch(console.error);
@@ -47,11 +49,30 @@ export default function KnowledgePage() {
     }
   };
 
+  const uploadFile = async (file: File | null) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('type', form.type || 'catalog');
+      if (form.title.trim()) fd.append('title', form.title.trim());
+      await api.post('/knowledge/upload', fd);
+      setShowForm(false);
+      setForm({ title: '', content: '', type: 'catalog' });
+      await load();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'فشل رفع الملف');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="page-wrap">
       <PageHeader
         title="قاعدة المعرفة"
-        subtitle="ارفع كتالوجك وسياساتك ليرد AI بدقة من بياناتك"
+        subtitle="الصق نصاً أو ارفع ملفاً (txt/md/csv/json) ليرد المندوب الذكي من بياناتك"
         actions={
           <button
             type="button"
@@ -93,6 +114,21 @@ export default function KnowledgePage() {
             </select>
           </label>
           <label className="block text-sm font-bold">
+            رفع ملف معرفة
+            <input
+              type="file"
+              accept=".txt,.md,.csv,.json,text/plain"
+              className="input-field mt-1.5"
+              disabled={uploading}
+              onChange={(e) => uploadFile(e.target.files?.[0] || null)}
+            />
+            <span className="block text-xs text-[var(--muted)] mt-1 font-normal">
+              الصيغ: txt · md · csv · json — حتى 2MB (العنوان اختياري عند الرفع)
+              {uploading ? ' · جاري الرفع...' : ''}
+            </span>
+          </label>
+          <div className="text-xs text-[var(--muted)] text-center">أو الصق المحتوى يدوياً</div>
+          <label className="block text-sm font-bold">
             المحتوى
             <textarea
               required
@@ -104,8 +140,8 @@ export default function KnowledgePage() {
             />
           </label>
           <div className="flex gap-3 form-actions">
-            <button type="submit" disabled={saving} className="btn-teal flex-1 justify-center disabled:opacity-50">
-              {saving ? 'جاري الحفظ...' : 'حفظ'}
+            <button type="submit" disabled={saving || uploading} className="btn-teal flex-1 justify-center disabled:opacity-50">
+              {saving ? 'جاري الحفظ...' : 'حفظ النص'}
             </button>
             <button
               type="button"
@@ -126,6 +162,7 @@ export default function KnowledgePage() {
                 <h3 className="font-semibold m-0">{d.title}</h3>
                 <p className="text-xs text-[var(--muted)] mt-1 mb-0">
                   <span className="badge badge-ok">{typeLabels[d.type] || d.type}</span>
+                  {d.filename ? ` · ${d.filename}` : ''}
                   {' · '}استُخدم {d.useCount || 0} مرة
                 </p>
               </div>

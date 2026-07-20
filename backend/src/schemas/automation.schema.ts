@@ -17,7 +17,7 @@ export class Automation {
   @Prop({ required: true, enum: ['new_customer', 'keyword', 'schedule', 'no_reply'] })
   trigger!: string;
 
-  @Prop({ type: Object, required: true })
+  @Prop({ type: Object, default: {} })
   triggerConfig!: Record<string, unknown>;
 
   @Prop({ type: [Object], default: [] })

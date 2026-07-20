@@ -175,11 +175,14 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href="/dashboard/whatsapp" className="btn-orange text-sm">
+          <Link href="/dashboard/executive" className="btn-orange text-sm">
+            اللوحة التنفيذية
+          </Link>
+          <Link href="/dashboard/whatsapp" className="btn-teal text-sm">
             <Smartphone size={16} strokeWidth={2.25} />
             {wa?.configured ? 'إدارة واتساب' : 'ربط واتساب الآن'}
           </Link>
-          <Link href="/dashboard/inbox" className="btn-teal text-sm">
+          <Link href="/dashboard/inbox" className="btn-ghost text-sm">
             <Inbox size={16} strokeWidth={2.25} />
             صندوق الرسائل
           </Link>

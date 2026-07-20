@@ -42,6 +42,17 @@ class SendMessageDto {
   @IsOptional() @IsString() replyToMessageId?: string;
 }
 
+class ConfigureGreenApiDto {
+  @IsOptional() @IsString() apiUrl?: string;
+  @IsOptional() @IsString() mediaUrl?: string;
+  @IsOptional() @IsString() idInstance?: string;
+  @IsOptional() @IsString() apiTokenInstance?: string;
+  @IsOptional() @IsString() displayPhoneNumber?: string;
+  @IsOptional() @IsBoolean() aiAutoReply?: boolean;
+  @IsOptional() @IsString() welcomeMessage?: string;
+  @IsOptional() @IsBoolean() setWebhook?: boolean;
+}
+
 @Controller('whatsapp')
 @UseGuards(JwtAuthGuard)
 export class WhatsappController {
@@ -67,9 +78,19 @@ export class WhatsappController {
     return this.whatsappService.configureWhatsApp(companyId, dto);
   }
 
+  @Put('configure-greenapi')
+  configureGreen(@CurrentUser('companyId') companyId: string, @Body() dto: ConfigureGreenApiDto) {
+    return this.whatsappService.configureGreenApi(companyId, dto);
+  }
+
   @Post('test-connection')
   testConnection(@CurrentUser('companyId') companyId: string, @Body() dto: TestConnectionDto) {
     return this.whatsappService.testConnection(companyId, dto);
+  }
+
+  @Post('test-greenapi')
+  testGreen(@CurrentUser('companyId') companyId: string, @Body() dto: ConfigureGreenApiDto) {
+    return this.whatsappService.testGreenApi(companyId, dto);
   }
 
   @Post('disconnect')

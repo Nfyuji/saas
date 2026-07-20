@@ -12,4 +12,9 @@ export class DashboardController {
   getStats(@CurrentUser('companyId') companyId: string) {
     return this.dashboardService.getStats(companyId);
   }
+
+  @Get('reports')
+  getReports(@CurrentUser('companyId') companyId: string) {
+    return this.dashboardService.getReports(companyId);
+  }
 }

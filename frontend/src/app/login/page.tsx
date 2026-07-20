@@ -87,6 +87,12 @@ export default function LoginPage() {
           </button>
         </form>
 
+        <p className="text-center text-[var(--muted)] mt-4 text-sm">
+          <Link href="/forgot-password" className="text-[var(--teal)] font-bold hover:underline">
+            نسيت كلمة المرور؟
+          </Link>
+        </p>
+
         {allowRegistration ? (
           <p className="text-center text-[var(--muted)] mt-6 text-sm">
             ليس لديك حساب؟{' '}

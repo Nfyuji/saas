@@ -88,6 +88,16 @@ export default function AutomationsPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [aiIdeas, setAiIdeas] = useState<
+    Array<{
+      name: string;
+      trigger: string;
+      triggerConfig?: Record<string, unknown>;
+      actions: Array<{ type: string; config: Record<string, unknown> }>;
+      reason?: string;
+    }>
+  >([]);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const load = () => {
     api.get<Automation[]>('/automations').then(setAutomations).catch(console.error);
@@ -186,6 +196,48 @@ export default function AutomationsPage() {
     }
   };
 
+  const loadAiIdeas = async () => {
+    setAiLoading(true);
+    try {
+      const res = await api.get<{ workflows: typeof aiIdeas }>('/intelligence/workflows/suggest');
+      setAiIdeas(res.workflows || []);
+      setMessage('اقتراحات AI جاهزة — اضغط تفعيل لأي تدفق');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'فشل اقتراح الأتمتة');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyAiWorkflow = async (wf: (typeof aiIdeas)[0]) => {
+    setSaving(true);
+    try {
+      const actions = (wf.actions || []).map((a) => {
+        if (a.type === 'send_message') {
+          return {
+            type: 'send_message',
+            config: { message: (a.config.message || a.config.text || '') as string },
+          };
+        }
+        return a;
+      });
+      await api.post('/automations', {
+        name: wf.name,
+        description: wf.reason || 'مقترح بواسطة AI',
+        trigger: wf.trigger,
+        triggerConfig: wf.triggerConfig || {},
+        actions,
+        isActive: true,
+      });
+      setMessage(`تم تفعيل: ${wf.name}`);
+      load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'فشل التفعيل');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const triggerSummary = (a: Automation) => {
     if (a.trigger === 'keyword') {
       const keys = (a.triggerConfig?.keywords as string[]) || [];
@@ -228,6 +280,35 @@ export default function AutomationsPage() {
       />
 
       {message && <div className={isError ? 'alert-err' : 'alert-ok'}>{message}</div>}
+
+      <section className="surface-card p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-display font-extrabold text-lg text-[var(--teal-dark)] m-0">
+            AI يبني الأتمتة
+          </h2>
+          <button type="button" className="btn-orange text-sm" disabled={aiLoading} onClick={loadAiIdeas}>
+            {aiLoading ? 'جاري الاقتراح...' : 'اقترح تدفقات بالـ AI'}
+          </button>
+        </div>
+        {aiIdeas.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {aiIdeas.map((wf, i) => (
+              <div key={i} className="rounded-2xl border border-[var(--border)] p-4">
+                <p className="font-bold m-0">{wf.name}</p>
+                <p className="text-xs text-[var(--muted)] mt-1 mb-3">{wf.reason}</p>
+                <button
+                  type="button"
+                  className="btn-teal text-sm"
+                  disabled={saving}
+                  onClick={() => applyAiWorkflow(wf)}
+                >
+                  تفعيل هذا التدفق
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="stat-grid !mb-0">
         <div className="mode-card !p-4">

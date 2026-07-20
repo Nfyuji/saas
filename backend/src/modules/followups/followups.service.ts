@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { FollowUp, FollowUpDocument } from '../../schemas/followup.schema';
@@ -200,10 +200,80 @@ export class FollowUpsService implements OnModuleDestroy {
       .lean();
   }
 
-  async processDueFollowUps() {
-    const due = await this.followUpModel
-      .find({ status: 'pending', scheduledAt: { $lte: new Date() } })
-      .limit(20);
+  async cancelOne(companyId: string, id: string) {
+    const fu = await this.followUpModel.findOneAndUpdate(
+      { _id: id, companyId: new Types.ObjectId(companyId), status: 'pending' },
+      { status: 'cancelled' },
+      { new: true },
+    );
+    if (!fu) throw new NotFoundException('المتابعة غير موجودة أو أُرسلت مسبقاً');
+    return fu;
+  }
+
+  async reschedule(companyId: string, id: string, scheduledAt: Date | string) {
+    const when = new Date(scheduledAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() - 60_000) {
+      throw new BadRequestException('وقت الجدولة غير صالح');
+    }
+    const fu = await this.followUpModel.findOneAndUpdate(
+      { _id: id, companyId: new Types.ObjectId(companyId), status: 'pending' },
+      { scheduledAt: when },
+      { new: true },
+    );
+    if (!fu) throw new NotFoundException('المتابعة غير موجودة');
+    return fu;
+  }
+
+  async sendNow(companyId: string, id: string) {
+    const fu = await this.followUpModel.findOne({
+      _id: id,
+      companyId: new Types.ObjectId(companyId),
+      status: 'pending',
+    });
+    if (!fu) throw new NotFoundException('المتابعة غير موجودة');
+    fu.scheduledAt = new Date();
+    await fu.save();
+    await this.processDueFollowUps(fu._id.toString());
+    return this.followUpModel.findById(fu._id).populate('customerId', 'name phone').lean();
+  }
+
+  async createManual(
+    companyId: string,
+    data: {
+      customerId: string;
+      message: string;
+      scheduledAt?: string;
+      conversationId?: string;
+      dealId?: string;
+      type?: string;
+    },
+  ) {
+    if (!data.message?.trim()) throw new BadRequestException('نص المتابعة مطلوب');
+    const customer = await this.customerModel.findOne({
+      _id: data.customerId,
+      companyId: new Types.ObjectId(companyId),
+    });
+    if (!customer) throw new NotFoundException('العميل غير موجود');
+
+    return this.followUpModel.create({
+      companyId: new Types.ObjectId(companyId),
+      customerId: customer._id,
+      conversationId: data.conversationId ? new Types.ObjectId(data.conversationId) : undefined,
+      dealId: data.dealId ? new Types.ObjectId(data.dealId) : undefined,
+      scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : new Date(Date.now() + 60 * 60 * 1000),
+      status: 'pending',
+      step: 1,
+      source: 'manual',
+      type: data.type || 'sales',
+      message: data.message.trim(),
+    });
+  }
+
+  async processDueFollowUps(onlyId?: string) {
+    const filter: Record<string, unknown> = { status: 'pending', scheduledAt: { $lte: new Date() } };
+    if (onlyId) filter._id = onlyId;
+
+    const due = await this.followUpModel.find(filter).limit(onlyId ? 1 : 20);
 
     for (const fu of due) {
       try {

@@ -55,4 +55,10 @@ export class WebhooksController {
 
     return { status: 'ok' };
   }
+
+  @Post('greenapi')
+  async receiveGreenWebhook(@Body() body: Record<string, unknown>) {
+    await this.whatsappService.processGreenNotification('', body);
+    return { status: 'ok' };
+  }
 }

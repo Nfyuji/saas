@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+﻿import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { SubscriptionAlertsService } from './subscription-alerts.service';
 import { Company, CompanySchema } from '../../schemas/company.schema';
@@ -7,6 +7,7 @@ import {
   SubscriptionAlert,
   SubscriptionAlertSchema,
 } from '../../schemas/subscription-alert.schema';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import {
       { name: User.name, schema: UserSchema },
       { name: SubscriptionAlert.name, schema: SubscriptionAlertSchema },
     ]),
+    NotificationsModule,
   ],
   providers: [SubscriptionAlertsService],
   exports: [SubscriptionAlertsService],

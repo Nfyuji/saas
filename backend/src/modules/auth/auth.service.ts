@@ -5,11 +5,14 @@ import {
   ForbiddenException,
   ServiceUnavailableException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { User, UserDocument } from '../../schemas/user.schema';
 import { Company, CompanyDocument } from '../../schemas/company.schema';
 import { PlatformSettings, PlatformSettingsDocument } from '../../schemas/platform-settings.schema';
@@ -18,12 +21,15 @@ import { RegisterDto, LoginDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Company.name) private companyModel: Model<CompanyDocument>,
     @InjectModel(PlatformSettings.name) private settingsModel: Model<PlatformSettingsDocument>,
     private jwtService: JwtService,
     private plansService: PlansService,
+    private config: ConfigService,
   ) {}
 
   private async getPlatformSettings() {
@@ -137,8 +143,54 @@ export class AuthService {
       throw new BadRequestException('كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف');
     }
     user.password = await bcrypt.hash(newPassword, 12);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
     await user.save();
     return { success: true, message: 'تم تحديث كلمة المرور' };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.userModel.findOne({ email: email.toLowerCase().trim() });
+    // لا نكشف إن كان الإيميل موجوداً أم لا
+    const generic = {
+      success: true,
+      message: 'إن وُجد الحساب، ستصلك تعليمات إعادة التعيين.',
+    };
+    if (!user || !user.isActive) return generic;
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save();
+
+    const frontend = this.config.get('FRONTEND_URL', 'http://localhost:3000');
+    const resetUrl = `${frontend}/reset-password?token=${rawToken}`;
+    this.logger.warn(`Password reset for ${user.email}: ${resetUrl}`);
+
+    const isProd = this.config.get('NODE_ENV') === 'production';
+    return {
+      ...generic,
+      ...(isProd ? {} : { resetUrl, token: rawToken }),
+    };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    if (!token?.trim()) throw new BadRequestException('رمز إعادة التعيين مطلوب');
+    if (newPassword.length < 6) {
+      throw new BadRequestException('كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف');
+    }
+    const hashed = crypto.createHash('sha256').update(token.trim()).digest('hex');
+    const user = await this.userModel.findOne({
+      resetPasswordToken: hashed,
+      resetPasswordExpires: { $gt: new Date() },
+    });
+    if (!user) throw new BadRequestException('رابط إعادة التعيين غير صالح أو منتهٍ');
+
+    user.password = await bcrypt.hash(newPassword, 12);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+    return { success: true, message: 'تم تعيين كلمة المرور الجديدة. يمكنك الدخول الآن.' };
   }
 
   async updateProfile(userId: string, name: string) {

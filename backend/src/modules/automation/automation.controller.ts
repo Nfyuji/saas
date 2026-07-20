@@ -9,7 +9,7 @@ class CreateAutomationDto {
   @IsString() @IsNotEmpty() name!: string;
   @IsOptional() @IsString() description?: string;
   @IsString() trigger!: string;
-  triggerConfig!: Record<string, unknown>;
+  @IsOptional() triggerConfig?: Record<string, unknown>;
   @IsArray() actions!: Array<{ type: string; config: Record<string, unknown> }>;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -30,7 +30,7 @@ export class AutomationController {
       name: dto.name,
       description: dto.description,
       trigger: dto.trigger as Automation['trigger'],
-      triggerConfig: dto.triggerConfig,
+      triggerConfig: dto.triggerConfig || {},
       actions: dto.actions as Automation['actions'],
       isActive: dto.isActive,
     });

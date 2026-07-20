@@ -31,6 +31,48 @@ export class PlatformSettings {
 
   @Prop({ default: false })
   maintenanceMode!: boolean;
+
+  /** openai | gemini | auto (يجرب الأول المتاح) */
+  @Prop({ default: 'auto', enum: ['openai', 'gemini', 'auto'] })
+  aiProvider!: string;
+
+  @Prop()
+  openaiApiKey?: string;
+
+  @Prop({ default: 'gpt-4o-mini' })
+  openaiModel?: string;
+
+  @Prop()
+  geminiApiKey?: string;
+
+  @Prop({ default: 'gemini-2.0-flash' })
+  geminiModel?: string;
+
+  /** ميزانية التوكنات الشهرية (0 = بلا حد) */
+  @Prop({ default: 1_000_000 })
+  openaiMonthlyTokenBudget!: number;
+
+  @Prop({ default: 1_000_000 })
+  geminiMonthlyTokenBudget!: number;
+
+  @Prop({ default: 0 })
+  openaiTokensUsedMonth!: number;
+
+  @Prop({ default: 0 })
+  geminiTokensUsedMonth!: number;
+
+  @Prop({ default: 0 })
+  openaiRequestsMonth!: number;
+
+  @Prop({ default: 0 })
+  geminiRequestsMonth!: number;
+
+  /** YYYY-MM لتصفير العداد شهرياً */
+  @Prop()
+  aiUsageMonthKey?: string;
+
+  @Prop({ default: true })
+  aiEnabled!: boolean;
 }
 
 export const PlatformSettingsSchema = SchemaFactory.createForClass(PlatformSettings);

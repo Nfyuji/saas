@@ -72,6 +72,7 @@ export class Company {
 
   @Prop({ type: Object, default: {} })
   whatsapp!: {
+    provider?: 'meta' | 'greenapi' | 'demo';
     phoneNumberId?: string;
     accessToken?: string;
     businessAccountId?: string;
@@ -83,6 +84,12 @@ export class Company {
     qualityRating?: string;
     codeVerificationStatus?: string;
     demo?: boolean;
+    greenApi?: {
+      apiUrl?: string;
+      mediaUrl?: string;
+      idInstance?: string;
+      apiTokenInstance?: string;
+    };
   };
 
   @Prop({ type: Object, default: {} })

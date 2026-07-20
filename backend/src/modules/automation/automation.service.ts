@@ -27,11 +27,18 @@ export class AutomationService {
     });
 
     for (const automation of automations) {
-      const shouldRun = this.checkTrigger(automation, messageContent, customer);
-      if (shouldRun) {
-        await this.executeActions(companyId, automation, customer, conversation);
-        automation.executionCount += 1;
-        await automation.save();
+      try {
+        if (!automation.triggerConfig) {
+          automation.triggerConfig = {};
+        }
+        const shouldRun = this.checkTrigger(automation, messageContent, customer);
+        if (shouldRun) {
+          await this.executeActions(companyId, automation, customer, conversation);
+          automation.executionCount += 1;
+          await automation.save();
+        }
+      } catch (e) {
+        this.logger.warn(`Automation "${automation.name}" failed: ${e}`);
       }
     }
   }
@@ -41,7 +48,12 @@ export class AutomationService {
   }
 
   async create(companyId: string, data: Partial<Automation>) {
-    return this.automationModel.create({ ...data, companyId: new Types.ObjectId(companyId) });
+    return this.automationModel.create({
+      ...data,
+      companyId: new Types.ObjectId(companyId),
+      triggerConfig: data.triggerConfig || {},
+      actions: data.actions || [],
+    });
   }
 
   async toggle(companyId: string, id: string) {
@@ -65,12 +77,13 @@ export class AutomationService {
   }
 
   private checkTrigger(automation: AutomationDocument, message: string, customer: CustomerDocument): boolean {
+    const config = automation.triggerConfig || {};
     switch (automation.trigger) {
       case 'new_customer':
         return customer.totalMessages <= 1;
       case 'keyword': {
-        const keywords = (automation.triggerConfig.keywords as string[]) || [];
-        return keywords.some((k) => message.toLowerCase().includes(k.toLowerCase()));
+        const keywords = (config.keywords as string[]) || [];
+        return keywords.some((k) => message.toLowerCase().includes(String(k).toLowerCase()));
       }
       default:
         return false;

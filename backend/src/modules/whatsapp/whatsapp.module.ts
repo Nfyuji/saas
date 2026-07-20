@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { WhatsappController } from './whatsapp.controller';
 import { WhatsappService } from './whatsapp.service';
 import { WhatsappApiService } from './whatsapp-api.service';
+import { GreenApiService } from './greenapi.service';
 import { Company, CompanySchema } from '../../schemas/company.schema';
 import { Customer, CustomerSchema } from '../../schemas/customer.schema';
 import { Conversation, ConversationSchema } from '../../schemas/conversation.schema';
@@ -32,7 +33,7 @@ import { OutboundWebhooksModule } from '../outbound-webhooks/outbound-webhooks.m
     OutboundWebhooksModule,
   ],
   controllers: [WhatsappController],
-  providers: [WhatsappService, WhatsappApiService],
-  exports: [WhatsappService, WhatsappApiService],
+  providers: [WhatsappService, WhatsappApiService, GreenApiService],
+  exports: [WhatsappService, WhatsappApiService, GreenApiService],
 })
 export class WhatsappModule {}

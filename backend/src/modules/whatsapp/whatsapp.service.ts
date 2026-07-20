@@ -13,6 +13,7 @@ import { Customer, CustomerDocument } from '../../schemas/customer.schema';
 import { Conversation, ConversationDocument } from '../../schemas/conversation.schema';
 import { Message, MessageDocument } from '../../schemas/message.schema';
 import { WhatsappApiService } from './whatsapp-api.service';
+import { GreenApiService } from './greenapi.service';
 import { AiService } from '../ai/ai.service';
 import { AutomationService } from '../automation/automation.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -48,6 +49,7 @@ export class WhatsappService {
     @InjectModel(Conversation.name) private conversationModel: Model<ConversationDocument>,
     @InjectModel(Message.name) private messageModel: Model<MessageDocument>,
     private whatsappApi: WhatsappApiService,
+    private greenApi: GreenApiService,
     private aiService: AiService,
     private automationService: AutomationService,
     private knowledgeService: KnowledgeService,
@@ -56,7 +58,11 @@ export class WhatsappService {
     private followUpsService: FollowUpsService,
     private entitlements: PlanEntitlementsService,
     private outboundWebhooks: OutboundWebhooksService,
-  ) {}
+  ) {
+    this.greenApi.setNotificationHandler(async (companyId, body) => {
+      await this.processGreenNotification(companyId, body);
+    });
+  }
 
   private metaErrorMessage(error: unknown): string {
     const err = error as {
@@ -159,6 +165,7 @@ export class WhatsappService {
 
     company.whatsapp = {
       ...company.whatsapp,
+      provider: 'meta',
       phoneNumberId,
       accessToken,
       businessAccountId: config.businessAccountId ?? company.whatsapp?.businessAccountId,
@@ -168,6 +175,7 @@ export class WhatsappService {
       codeVerificationStatus,
       webhookConfigured: true,
       demo: false,
+      greenApi: undefined,
       aiAutoReply: config.aiAutoReply ?? company.whatsapp?.aiAutoReply ?? true,
       welcomeMessage:
         config.welcomeMessage ?? company.whatsapp?.welcomeMessage ?? 'مرحباً! كيف يمكنني مساعدتك؟',
@@ -190,7 +198,197 @@ export class WhatsappService {
       welcomeMessage: company.whatsapp?.welcomeMessage || 'مرحباً! كيف يمكنني مساعدتك؟',
     };
     await company.save();
-    return { success: true, message: 'تم فصل ربط Meta', whatsapp: await this.getWhatsAppStatus(companyId) };
+    return { success: true, message: 'تم فصل ربط واتساب', whatsapp: await this.getWhatsAppStatus(companyId) };
+  }
+
+  async configureGreenApi(
+    companyId: string,
+    config: {
+      apiUrl?: string;
+      mediaUrl?: string;
+      idInstance?: string;
+      apiTokenInstance?: string;
+      displayPhoneNumber?: string;
+      aiAutoReply?: boolean;
+      welcomeMessage?: string;
+      setWebhook?: boolean;
+    },
+  ) {
+    const company = await this.companyModel.findById(companyId);
+    if (!company) throw new NotFoundException('الشركة غير موجودة');
+
+    const apiUrl = (
+      config.apiUrl?.trim() ||
+      company.whatsapp?.greenApi?.apiUrl ||
+      process.env.GREEN_API_URL ||
+      ''
+    ).replace(/\/$/, '');
+    const mediaUrl = (
+      config.mediaUrl?.trim() ||
+      company.whatsapp?.greenApi?.mediaUrl ||
+      process.env.GREEN_API_MEDIA_URL ||
+      apiUrl
+    ).replace(/\/$/, '');
+    const idInstance = String(
+      config.idInstance?.trim() ||
+        company.whatsapp?.greenApi?.idInstance ||
+        process.env.GREEN_API_ID_INSTANCE ||
+        '',
+    );
+    const apiTokenInstance =
+      config.apiTokenInstance?.trim() ||
+      company.whatsapp?.greenApi?.apiTokenInstance ||
+      process.env.GREEN_API_TOKEN_INSTANCE ||
+      '';
+
+    if (!apiUrl || !idInstance || !apiTokenInstance) {
+      throw new BadRequestException('apiUrl و idInstance و apiTokenInstance مطلوبة لـ Green API');
+    }
+
+    const creds = { apiUrl, mediaUrl, idInstance, apiTokenInstance };
+    let state = 'unknown';
+    try {
+      const st = await this.greenApi.getStateInstance(creds);
+      state = st.stateInstance || 'unknown';
+    } catch (error) {
+      throw new BadRequestException(
+        `فشل الاتصال بـ Green API: ${(error as Error).message || error}`,
+      );
+    }
+
+    if (state !== 'authorized' && state !== 'Authorized') {
+      // Green API returns lowercase "authorized"
+      if (String(state).toLowerCase() !== 'authorized') {
+        throw new BadRequestException(
+          `حالة المثيل: ${state}. يجب أن يكون Authorized في لوحة Green API.`,
+        );
+      }
+    }
+
+    const phone =
+      config.displayPhoneNumber?.replace(/[^0-9]/g, '') ||
+      company.whatsapp?.displayPhoneNumber?.replace(/[^0-9]/g, '') ||
+      process.env.GREEN_API_PHONE ||
+      '';
+
+    const apiBase = (process.env.API_URL || 'http://localhost:3001').replace(/\/$/, '');
+    const webhookUrl = `${apiBase}/api/webhooks/greenapi`;
+    const isLocalApi = /localhost|127\.0\.0\.1/.test(apiBase);
+
+    try {
+      if (isLocalApi || config.setWebhook === false) {
+        // Poll mode: webhook must be empty or Green returns 400 on receiveNotification
+        await this.greenApi.setSettings(creds, {
+          webhookUrl: '',
+          webhookUrlToken: '',
+          incomingWebhook: 'yes',
+          outgoingWebhook: 'yes',
+          outgoingMessageWebhook: 'yes',
+          stateWebhook: 'yes',
+        });
+      } else {
+        await this.greenApi.setSettings(creds, {
+          webhookUrl,
+          incomingWebhook: 'yes',
+          outgoingWebhook: 'yes',
+          outgoingMessageWebhook: 'yes',
+          stateWebhook: 'yes',
+        });
+      }
+    } catch (e) {
+      this.logger.warn(`Green setSettings webhook failed: ${e}`);
+    }
+
+    company.whatsapp = {
+      ...company.whatsapp,
+      provider: 'greenapi',
+      demo: false,
+      phoneNumberId: `green_${idInstance}`,
+      accessToken: apiTokenInstance,
+      displayPhoneNumber: phone || company.whatsapp?.displayPhoneNumber,
+      verifiedName: company.whatsapp?.verifiedName || company.name || 'Green API',
+      webhookConfigured: true,
+      qualityRating: String(state),
+      codeVerificationStatus: 'authorized',
+      aiAutoReply: config.aiAutoReply ?? company.whatsapp?.aiAutoReply ?? true,
+      welcomeMessage:
+        config.welcomeMessage ??
+        company.whatsapp?.welcomeMessage ??
+        'مرحباً! كيف يمكنني مساعدتك؟',
+      greenApi: {
+        apiUrl,
+        mediaUrl,
+        idInstance,
+        apiTokenInstance,
+      },
+    };
+    await company.save();
+
+    return {
+      success: true,
+      message: `تم ربط واتساب عبر Green API · الحالة: ${state}`,
+      stateInstance: state,
+      whatsapp: await this.getWhatsAppStatus(companyId),
+    };
+  }
+
+  async testGreenApi(
+    companyId: string,
+    config?: {
+      apiUrl?: string;
+      idInstance?: string;
+      apiTokenInstance?: string;
+    },
+  ) {
+    const company = await this.companyModel.findById(companyId);
+    if (!company) throw new NotFoundException('الشركة غير موجودة');
+
+    const apiUrl = (
+      config?.apiUrl ||
+      company.whatsapp?.greenApi?.apiUrl ||
+      process.env.GREEN_API_URL ||
+      ''
+    ).replace(/\/$/, '');
+    const idInstance = String(
+      config?.idInstance ||
+        company.whatsapp?.greenApi?.idInstance ||
+        process.env.GREEN_API_ID_INSTANCE ||
+        '',
+    );
+    const apiTokenInstance =
+      config?.apiTokenInstance ||
+      company.whatsapp?.greenApi?.apiTokenInstance ||
+      process.env.GREEN_API_TOKEN_INSTANCE ||
+      '';
+
+    if (!apiUrl || !idInstance || !apiTokenInstance) {
+      throw new BadRequestException('أدخل بيانات Green API للاختبار');
+    }
+
+    const creds = {
+      apiUrl,
+      mediaUrl: apiUrl,
+      idInstance,
+      apiTokenInstance,
+    };
+    const state = await this.greenApi.getStateInstance(creds);
+    let settings: Record<string, unknown> | null = null;
+    try {
+      settings = await this.greenApi.getSettings(creds);
+    } catch {
+      /* optional */
+    }
+
+    return {
+      success: true,
+      connected: String(state.stateInstance || '').toLowerCase() === 'authorized',
+      stateInstance: state.stateInstance,
+      displayPhoneNumber:
+        (settings?.wid as string)?.split('@')[0] ||
+        company.whatsapp?.displayPhoneNumber ||
+        process.env.GREEN_API_PHONE,
+      message: `Green API · الحالة: ${state.stateInstance}`,
+    };
   }
 
   getMetaEmbeddedConfig() {
@@ -267,7 +465,10 @@ export class WhatsappService {
     const company = await this.companyModel.findById(companyId);
     if (!company) throw new NotFoundException('الشركة غير موجودة');
 
-    const configured = !!company.whatsapp?.phoneNumberId && !!company.whatsapp?.accessToken;
+    const provider =
+      company.whatsapp?.provider ||
+      (this.isDemo(company) ? 'demo' : company.whatsapp?.phoneNumberId ? 'meta' : undefined);
+    const configured = this.isWhatsAppConfigured(company);
     const demo = this.isDemo(company);
     const apiBase = (process.env.API_URL || 'http://localhost:3001').replace(/\/$/, '');
     const wa = company.whatsapp as {
@@ -275,27 +476,47 @@ export class WhatsappService {
       codeVerificationStatus?: string;
       phoneNumberId?: string;
       businessAccountId?: string;
+      greenApi?: {
+        apiUrl?: string;
+        mediaUrl?: string;
+        idInstance?: string;
+        apiTokenInstance?: string;
+      };
     };
     const meta = this.getMetaEmbeddedConfig();
 
     return {
       configured,
       demo,
+      provider: provider || null,
       displayPhoneNumber: company.whatsapp?.displayPhoneNumber,
       verifiedName: company.whatsapp?.verifiedName,
       phoneNumberId: wa.phoneNumberId || undefined,
       businessAccountId: wa.businessAccountId || undefined,
-      hasAccessToken: !!company.whatsapp?.accessToken,
+      hasAccessToken: !!company.whatsapp?.accessToken || !!wa.greenApi?.apiTokenInstance,
       qualityRating: wa.qualityRating,
       codeVerificationStatus: wa.codeVerificationStatus,
       aiAutoReply: company.whatsapp?.aiAutoReply ?? false,
       welcomeMessage: company.whatsapp?.welcomeMessage,
-      webhookUrl: `${apiBase}/api/webhooks/whatsapp`,
+      webhookUrl:
+        provider === 'greenapi'
+          ? `${apiBase}/api/webhooks/greenapi`
+          : `${apiBase}/api/webhooks/whatsapp`,
+      greenWebhookUrl: `${apiBase}/api/webhooks/greenapi`,
       verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'businessos-verify',
       apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
       metaAppSetupUrl: 'https://developers.facebook.com/apps/',
       metaWhatsAppDocsUrl: 'https://developers.facebook.com/docs/whatsapp/cloud-api/get-started',
       metaEmbeddedSignup: meta,
+      greenApi: {
+        configured: provider === 'greenapi',
+        apiUrl: wa.greenApi?.apiUrl || process.env.GREEN_API_URL || '',
+        mediaUrl: wa.greenApi?.mediaUrl || process.env.GREEN_API_MEDIA_URL || '',
+        idInstance: wa.greenApi?.idInstance || process.env.GREEN_API_ID_INSTANCE || '',
+        hasToken: !!(wa.greenApi?.apiTokenInstance || process.env.GREEN_API_TOKEN_INSTANCE),
+        docsUrl: 'https://green-api.com/en/docs/api/',
+        receiveMode: 'poll+webhook',
+      },
     };
   }
 
@@ -322,7 +543,6 @@ export class WhatsappService {
   ) {
     await this.entitlements.assertDailyMessageLimit(companyId);
     const company = await this.getCompanyWithWhatsApp(companyId);
-    const credentials = this.getCredentials(company);
     const phone = this.whatsappApi.normalizePhone(dto.to);
     const demo = this.isDemo(company);
 
@@ -330,7 +550,29 @@ export class WhatsappService {
 
     if (demo) {
       apiResponse = { messages: [{ id: `demo_msg_${Date.now()}` }] };
+    } else if (this.isGreen(company)) {
+      if (dto.type !== 'text' && dto.type !== 'template') {
+        if (dto.mediaLink) {
+          const g = this.greenApi.getCredentialsFromCompany(company)!;
+          apiResponse = await this.greenApi.sendFileByUrl(
+            g,
+            phone,
+            dto.mediaLink,
+            dto.filename || 'file',
+            dto.caption || dto.text,
+          );
+        } else {
+          throw new BadRequestException('Green API: أرسل رابط ملف (mediaLink) للوسائط أو استخدم نصاً');
+        }
+      } else {
+        const text =
+          dto.type === 'template'
+            ? `[قالب ${dto.templateName}] ${dto.text || ''}`.trim()
+            : dto.text || '';
+        apiResponse = await this.dispatchText(company, phone, text);
+      }
     } else {
+      const credentials = this.getCredentials(company);
       switch (dto.type) {
         case 'text':
           apiResponse = await this.whatsappApi.sendText(credentials, {
@@ -414,13 +656,16 @@ export class WhatsappService {
 
   async uploadMedia(companyId: string, file: Buffer, mimeType: string, filename: string) {
     const company = await this.getCompanyWithWhatsApp(companyId);
+    if (this.isGreen(company)) {
+      throw new BadRequestException('رفع الملفات المباشر غير متاح عبر Green API هنا — استخدم mediaLink (رابط عام)');
+    }
     const result = await this.whatsappApi.uploadMedia(this.getCredentials(company), file, mimeType, filename);
     return { mediaId: result.id };
   }
 
   async markAsRead(companyId: string, messageId: string) {
     const company = await this.getCompanyWithWhatsApp(companyId);
-    if (!this.isDemo(company)) {
+    if (!this.isDemo(company) && !this.isGreen(company)) {
       await this.whatsappApi.markAsRead(this.getCredentials(company), messageId);
     }
 
@@ -434,7 +679,7 @@ export class WhatsappService {
 
   async getTemplates(companyId: string) {
     const company = await this.getCompanyWithWhatsApp(companyId);
-    if (this.isDemo(company)) {
+    if (this.isDemo(company) || this.isGreen(company)) {
       return {
         data: [
           { name: 'hello_world', status: 'APPROVED', language: 'ar', category: 'UTILITY' },
@@ -457,11 +702,14 @@ export class WhatsappService {
 
     company.whatsapp = {
       ...company.whatsapp,
+      provider: 'demo',
       phoneNumberId: `demo_${companyId}`,
       accessToken: 'demo_token',
       displayPhoneNumber: '+966 50 000 0000',
       verifiedName: `${company.name} (تجريبي)`,
       webhookConfigured: true,
+      demo: true,
+      greenApi: undefined,
       aiAutoReply: true,
       welcomeMessage: company.whatsapp?.welcomeMessage || 'مرحباً! كيف يمكنني مساعدتك؟',
     };
@@ -538,7 +786,11 @@ export class WhatsappService {
     );
 
     await this.followUpsService.handlePossibleCsatReply(companyId, customer, dto.text);
-    await this.automationService.processIncomingMessage(companyId, customer, conversation, dto.text);
+    try {
+      await this.automationService.processIncomingMessage(companyId, customer, conversation, dto.text);
+    } catch (e) {
+      this.logger.warn(`Automation on simulate failed: ${e}`);
+    }
 
     const isBuyer =
       ['customer', 'vip'].includes(customer.status) ||
@@ -559,7 +811,11 @@ export class WhatsappService {
     await this.sendWelcomeCampaign(fresh, companyId, demoCredentials, customer, conversation, phone, isNew);
 
     let aiReply: string | null = null;
-    if (fresh.whatsapp?.aiAutoReply !== false && fresh.settings?.aiEnabled !== false) {
+    if (
+      !conversation.aiPaused &&
+      fresh.whatsapp?.aiAutoReply !== false &&
+      fresh.settings?.aiEnabled !== false
+    ) {
       const knowledgeContext = await this.knowledgeService.getContextForAi(companyId, dto.text);
       const history = await this.messageModel
         .find({ conversationId: conversation._id })
@@ -651,26 +907,108 @@ export class WhatsappService {
     }
   }
 
+  /** Webhook أو polling من Green API */
+  async processGreenNotification(companyIdOrEmpty: string, body: Record<string, unknown>) {
+    const parsed = this.greenApi.parseNotification(body);
+    if (!parsed) return { status: 'ignored' };
+
+    let company: CompanyDocument | null = null;
+    if (companyIdOrEmpty) {
+      company = await this.companyModel.findById(companyIdOrEmpty);
+    }
+    if (!company && parsed.idInstance) {
+      company = await this.companyModel.findOne({
+        $or: [
+          { 'whatsapp.greenApi.idInstance': String(parsed.idInstance) },
+          { 'whatsapp.phoneNumberId': `green_${parsed.idInstance}` },
+        ],
+      });
+    }
+    if (!company) {
+      this.logger.warn(`Green notification: no company for instance ${parsed.idInstance}`);
+      return { status: 'no_company' };
+    }
+
+    const companyId = company._id.toString();
+
+    if (parsed.type === 'status' && parsed.idMessage) {
+      await this.updateMessageStatus(companyId, parsed.idMessage, parsed.status || 'sent');
+      return { status: 'ok' };
+    }
+
+    // رسائل صادرة من الهاتف فقط — سجّلها كـ outbound
+    if (parsed.rawTypeWebhook === 'outgoingMessageReceived') {
+      const phone = this.whatsappApi.normalizePhone(parsed.from);
+      const { customer } = await this.findOrCreateCustomer(
+        companyId,
+        phone,
+        parsed.senderName || `عميل ${phone.slice(-4)}`,
+      );
+      const conversation = await this.findOrCreateConversation(companyId, customer._id, phone);
+      const exists = await this.messageModel.findOne({
+        companyId: new Types.ObjectId(companyId),
+        whatsappMessageId: parsed.idMessage,
+      });
+      if (!exists) {
+        await this.messageModel.create({
+          companyId: new Types.ObjectId(companyId),
+          conversationId: conversation._id,
+          customerId: customer._id,
+          direction: 'outbound',
+          type: 'text',
+          content: parsed.text,
+          channel: 'whatsapp',
+          status: 'sent',
+          whatsappMessageId: parsed.idMessage,
+          metadata: { source: 'green_phone' },
+        });
+        conversation.lastMessage = parsed.text || '[رسالة]';
+        conversation.lastMessageAt = new Date();
+        await conversation.save();
+      }
+      return { status: 'ok' };
+    }
+
+    const fakeMsg: IncomingMessage = {
+      from: parsed.from,
+      id: parsed.idMessage,
+      timestamp: String(parsed.timestamp || Math.floor(Date.now() / 1000)),
+      type: 'text',
+      text: { body: parsed.text || '' },
+    };
+
+    const credentials = this.isGreen(company)
+      ? { phoneNumberId: company.whatsapp!.phoneNumberId!, accessToken: company.whatsapp!.accessToken! }
+      : this.getCredentials(company);
+
+    await this.handleIncomingMessage(company, companyId, credentials, fakeMsg, parsed.senderName);
+    return { status: 'ok' };
+  }
+
   private async handleIncomingMessage(
     company: CompanyDocument,
     companyId: string,
     credentials: { phoneNumberId: string; accessToken: string },
     msg: IncomingMessage,
+    contactName?: string,
   ) {
     const phone = this.whatsappApi.normalizePhone(msg.from);
     const { customer, isNew } = await this.findOrCreateCustomer(
       companyId,
       phone,
-      `عميل ${phone.slice(-4)}`,
+      contactName || `عميل ${phone.slice(-4)}`,
     );
     const conversation = await this.findOrCreateConversation(companyId, customer._id, phone);
 
-    if (!this.isDemo(company)) {
+    if (!this.isDemo(company) && !this.isGreen(company)) {
       try {
         await this.whatsappApi.markAsRead(credentials, msg.id);
       } catch (e) {
         this.logger.warn(`markAsRead failed: ${e}`);
       }
+    } else if (this.isGreen(company)) {
+      const g = this.greenApi.getCredentialsFromCompany(company);
+      if (g) await this.greenApi.readChat(g, phone);
     }
 
     const parsed = await this.parseIncomingMessage(credentials, msg);
@@ -702,7 +1040,11 @@ export class WhatsappService {
       await this.followUpsService.handlePossibleCsatReply(companyId, customer, parsed.content);
     }
 
-    await this.automationService.processIncomingMessage(companyId, customer, conversation, parsed.content || '');
+    try {
+      await this.automationService.processIncomingMessage(companyId, customer, conversation, parsed.content || '');
+    } catch (e) {
+      this.logger.warn(`Automation on inbound failed: ${e}`);
+    }
 
     const deal = await this.dealsService.ensureDealForCustomer(
       companyId,
@@ -728,7 +1070,12 @@ export class WhatsappService {
 
     await this.sendWelcomeCampaign(company, companyId, credentials, customer, conversation, phone, isNew);
 
-    if (company.whatsapp?.aiAutoReply && company.settings?.aiEnabled !== false && parsed.content) {
+    if (
+      !conversation.aiPaused &&
+      company.whatsapp?.aiAutoReply &&
+      company.settings?.aiEnabled !== false &&
+      parsed.content
+    ) {
       await this.handleAiReply(
         company,
         companyId,
@@ -786,12 +1133,7 @@ export class WhatsappService {
         isBuyer,
       });
 
-      const apiResponse = this.isDemo(company)
-        ? { messages: [{ id: `demo_ai_${Date.now()}` }] }
-        : await this.whatsappApi.sendText(credentials, {
-            to: phone,
-            text: aiResponse,
-          });
+      const apiResponse = await this.dispatchText(company, phone, aiResponse);
 
       await this.messageModel.create({
         companyId: new Types.ObjectId(companyId),
@@ -872,9 +1214,11 @@ export class WhatsappService {
   }
 
   async sendTestToNumber(companyId: string, userId: string, to: string, text?: string) {
+    const company = await this.companyModel.findById(companyId);
+    const via = this.isGreen(company as CompanyDocument) ? 'Green API' : 'Meta';
     const body =
       text?.trim() ||
-      'رسالة اختبار من BusinessOS AI ✅ — إذا وصلتك فالاتصال بـ Meta يعمل.';
+      `رسالة اختبار من BusinessOS AI ✅ — إذا وصلتك فالاتصال بـ ${via} يعمل.`;
     return this.sendMessage(companyId, userId, { to, type: 'text', text: body });
   }
 
@@ -893,9 +1237,7 @@ export class WhatsappService {
     if (!text) return;
 
     try {
-      const apiResponse = this.isDemo(company)
-        ? { messages: [{ id: `demo_welcome_${Date.now()}` }] }
-        : await this.whatsappApi.sendText(credentials, { to: phone, text });
+      const apiResponse = await this.dispatchText(company, phone, text);
 
       await this.messageModel.create({
         companyId: new Types.ObjectId(companyId),
@@ -986,14 +1328,51 @@ export class WhatsappService {
   private async getCompanyWithWhatsApp(companyId: string) {
     const company = await this.companyModel.findById(companyId);
     if (!company) throw new NotFoundException('الشركة غير موجودة');
-    if (!company.whatsapp?.phoneNumberId || !company.whatsapp?.accessToken) {
-      throw new NotFoundException('واتساب غير مُعد. فعّل وضع التجربة أو اربط واتساب الحقيقي');
+    if (!this.isWhatsAppConfigured(company)) {
+      throw new NotFoundException('واتساب غير مُعد. فعّل وضع التجربة أو اربط Meta / Green API');
     }
     return company;
   }
 
-  private isDemo(company: CompanyDocument) {
-    return !!company.whatsapp?.phoneNumberId?.startsWith('demo_') || company.whatsapp?.accessToken === 'demo_token';
+  private isWhatsAppConfigured(company: CompanyDocument) {
+    if (this.isGreen(company)) {
+      return !!(
+        company.whatsapp?.greenApi?.idInstance &&
+        (company.whatsapp?.greenApi?.apiTokenInstance || company.whatsapp?.accessToken)
+      );
+    }
+    return !!(company.whatsapp?.phoneNumberId && company.whatsapp?.accessToken);
+  }
+
+  private isDemo(company: CompanyDocument | null | undefined) {
+    if (!company?.whatsapp) return false;
+    if (company.whatsapp.provider === 'demo') return true;
+    if (company.whatsapp.provider === 'greenapi') return false;
+    return (
+      !!company.whatsapp.phoneNumberId?.startsWith('demo_') ||
+      company.whatsapp.accessToken === 'demo_token' ||
+      !!company.whatsapp.demo
+    );
+  }
+
+  private isGreen(company: CompanyDocument | null | undefined) {
+    return company?.whatsapp?.provider === 'greenapi';
+  }
+
+  private async dispatchText(
+    company: CompanyDocument,
+    phone: string,
+    text: string,
+  ): Promise<{ messages?: Array<{ id: string }> }> {
+    if (this.isDemo(company)) {
+      return { messages: [{ id: `demo_msg_${Date.now()}` }] };
+    }
+    if (this.isGreen(company)) {
+      const g = this.greenApi.getCredentialsFromCompany(company);
+      if (!g) throw new BadRequestException('بيانات Green API غير مكتملة');
+      return this.greenApi.sendText(g, phone, text);
+    }
+    return this.whatsappApi.sendText(this.getCredentials(company), { to: phone, text });
   }
 
   private getCredentials(company: CompanyDocument) {

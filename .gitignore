@@ -11,3 +11,5 @@ coverage/
 uploads/
 .turbo/
 *.tsbuildinfo
+backend/scripts/smoke-result.json
+*.bak

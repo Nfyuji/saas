@@ -2,7 +2,7 @@ import { Controller, Get, Put, Param, Query, Body, UseGuards } from '@nestjs/com
 import { ConversationsService } from './conversations.service';
 import { JwtAuthGuard } from '../../common/guards/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { IsString } from 'class-validator';
+import { IsBoolean, IsString } from 'class-validator';
 
 class UpdateStatusDto {
   @IsString() status!: string;
@@ -10,6 +10,10 @@ class UpdateStatusDto {
 
 class AssignAgentDto {
   @IsString() agentId!: string;
+}
+
+class AiPausedDto {
+  @IsBoolean() aiPaused!: boolean;
 }
 
 @Controller('conversations')
@@ -58,5 +62,14 @@ export class ConversationsController {
     @Body() dto: AssignAgentDto,
   ) {
     return this.conversationsService.assignAgent(companyId, id, dto.agentId);
+  }
+
+  @Put(':id/ai-paused')
+  setAiPaused(
+    @CurrentUser('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: AiPausedDto,
+  ) {
+    return this.conversationsService.setAiPaused(companyId, id, dto.aiPaused);
   }
 }

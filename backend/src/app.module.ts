@@ -25,6 +25,8 @@ import { SubscriptionAlertsModule } from './modules/subscription-alerts/subscrip
 import { TeamModule } from './modules/team/team.module';
 import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-webhooks.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { IntelligenceModule } from './modules/intelligence/intelligence.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -59,6 +61,8 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
     TeamModule,
     OutboundWebhooksModule,
     CampaignsModule,
+    IntelligenceModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

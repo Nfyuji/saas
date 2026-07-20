@@ -29,6 +29,10 @@ export class Conversation {
   @Prop({ default: false })
   aiHandled!: boolean;
 
+  /** عندما يكون true يتوقف الرد الآلي ويترك المحادثة للموظف */
+  @Prop({ default: false })
+  aiPaused!: boolean;
+
   @Prop({ type: Types.ObjectId, ref: 'User' })
   assignedTo?: Types.ObjectId;
 

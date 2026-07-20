@@ -553,22 +553,43 @@ export class PlatformAdminService implements OnModuleInit {
     if (!settings) {
       settings = await this.settingsModel.create({ key: 'default' });
     }
-    return settings;
+    const obj = settings.toObject();
+    // لا نُرجع المفاتيح الخام في إعدادات عامة
+    delete (obj as { openaiApiKey?: string }).openaiApiKey;
+    delete (obj as { geminiApiKey?: string }).geminiApiKey;
+    return obj;
   }
 
-  async updateSettings(data: Partial<PlatformSettings>) {
+  async updateSettings(data: Partial<PlatformSettings> & Record<string, unknown>) {
+    const allowed = [
+      'platformName',
+      'supportMessage',
+      'supportEmail',
+      'allowRegistration',
+      'trialEnabled',
+      'trialDays',
+      'defaultPlanCode',
+      'maintenanceMode',
+    ];
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) {
+      if (data[k] !== undefined) patch[k] = data[k];
+    }
     const settings = await this.settingsModel.findOneAndUpdate(
       { key: 'default' },
-      { $set: data },
+      { $set: patch },
       { new: true, upsert: true },
     );
     await this.audit('settings.update', {
       targetType: 'settings',
       targetId: 'default',
       targetName: 'platform',
-      meta: data as Record<string, unknown>,
+      meta: patch,
     });
-    return settings;
+    const obj = settings!.toObject();
+    delete (obj as { openaiApiKey?: string }).openaiApiKey;
+    delete (obj as { geminiApiKey?: string }).geminiApiKey;
+    return obj;
   }
 
   async reports() {
