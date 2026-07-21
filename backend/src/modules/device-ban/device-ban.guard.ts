@@ -6,6 +6,11 @@ import {
 import { Request } from 'express';
 import { DeviceBanService } from './device-ban.service';
 
+function clientIp(req: Request): string {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0]?.trim();
+  return xf || req.ip || req.socket?.remoteAddress || '';
+}
+
 @Injectable()
 export class DeviceBanGuard implements CanActivate {
   constructor(private deviceBanService: DeviceBanService) {}
@@ -14,7 +19,6 @@ export class DeviceBanGuard implements CanActivate {
     const req = context.switchToHttp().getRequest<Request>();
     const path = (req.originalUrl || req.url || '').split('?')[0];
 
-    // مسارات يجب أن تبقى متاحة (صحة، ويب هوك، فحص الحظر نفسه)
     if (
       path.startsWith('/api/health') ||
       path.startsWith('/api/webhooks') ||
@@ -25,13 +29,15 @@ export class DeviceBanGuard implements CanActivate {
     }
 
     const fp = String(
-      req.headers['x-device-fingerprint'] ||
-        req.headers['x-device-id'] ||
-        '',
+      req.headers['x-device-fingerprint'] || req.headers['x-device-id'] || '',
     ).trim();
 
     if (fp) {
-      await this.deviceBanService.assertNotBanned(fp);
+      await this.deviceBanService.assertNotBanned(fp, {
+        ip: clientIp(req),
+        userAgent: String(req.headers['user-agent'] || ''),
+        path,
+      });
     }
 
     return true;

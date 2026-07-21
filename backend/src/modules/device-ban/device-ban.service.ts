@@ -3,6 +3,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import {
   DeviceBan,
+  DeviceBanAttempt,
+  DeviceBanAttemptDocument,
   DeviceBanDocument,
   DeviceVisit,
   DeviceVisitDocument,
@@ -16,6 +18,8 @@ export class DeviceBanService {
   constructor(
     @InjectModel(DeviceBan.name) private banModel: Model<DeviceBanDocument>,
     @InjectModel(DeviceVisit.name) private visitModel: Model<DeviceVisitDocument>,
+    @InjectModel(DeviceBanAttempt.name)
+    private attemptModel: Model<DeviceBanAttemptDocument>,
   ) {}
 
   private cacheGet(fp: string): boolean | null {
@@ -32,11 +36,6 @@ export class DeviceBanService {
     this.bannedCache.set(fp, { banned, at: Date.now() });
   }
 
-  invalidateCache(fp?: string) {
-    if (fp) this.bannedCache.delete(fp);
-    else this.bannedCache.clear();
-  }
-
   async isBanned(fingerprint?: string | null): Promise<boolean> {
     const fp = String(fingerprint || '').trim();
     if (!fp || fp.length < 8) return false;
@@ -48,13 +47,70 @@ export class DeviceBanService {
     return banned;
   }
 
-  async assertNotBanned(fingerprint?: string | null) {
-    if (await this.isBanned(fingerprint)) {
-      throw new ForbiddenException({
-        code: 'DEVICE_BANNED',
-        message: 'تم حظر هذا الجهاز نهائياً من الوصول للمنصة',
-      });
+  /** يسجّل محاولة دخول بعد الحظر */
+  async recordAttempt(input: {
+    fingerprint: string;
+    ip?: string;
+    userAgent?: string;
+    path?: string;
+    source?: 'check' | 'api' | 'login' | 'page';
+    meta?: Record<string, unknown>;
+  }) {
+    const fingerprint = String(input.fingerprint || '').trim();
+    if (!fingerprint || fingerprint.length < 8) return null;
+
+    const ban = await this.banModel.findOne({ fingerprint, isActive: true });
+    if (!ban) return null;
+
+    const now = new Date();
+    const ip = (input.ip || '').replace(/^::ffff:/, '').trim() || undefined;
+
+    await this.attemptModel.create({
+      fingerprint,
+      banId: ban._id,
+      ip,
+      userAgent: input.userAgent?.slice(0, 500),
+      path: input.path?.slice(0, 300),
+      source: input.source || 'check',
+      meta: input.meta || {},
+      attemptedAt: now,
+    });
+
+    ban.attemptCount = (ban.attemptCount || 0) + 1;
+    ban.lastAttemptAt = now;
+    if (ip) {
+      ban.lastAttemptIp = ip;
+      ban.lastIp = ip;
+      if (!ban.ipHistory?.includes(ip)) {
+        ban.ipHistory = [...(ban.ipHistory || []), ip].slice(-30);
+      }
     }
+    if (input.path) ban.lastAttemptPath = input.path.slice(0, 300);
+    if (input.userAgent) ban.userAgent = input.userAgent.slice(0, 500);
+    await ban.save();
+
+    return ban;
+  }
+
+  async assertNotBanned(
+    fingerprint?: string | null,
+    ctx?: { ip?: string; userAgent?: string; path?: string },
+  ) {
+    const fp = String(fingerprint || '').trim();
+    if (!(await this.isBanned(fp))) return;
+
+    await this.recordAttempt({
+      fingerprint: fp,
+      ip: ctx?.ip,
+      userAgent: ctx?.userAgent,
+      path: ctx?.path,
+      source: 'api',
+    }).catch(() => undefined);
+
+    throw new ForbiddenException({
+      code: 'DEVICE_BANNED',
+      message: 'تم حظر هذا الجهاز نهائياً من الوصول للمنصة',
+    });
   }
 
   async checkAndTrack(input: {
@@ -64,6 +120,7 @@ export class DeviceBanService {
     userId?: string;
     userEmail?: string;
     meta?: Record<string, unknown>;
+    path?: string;
   }) {
     const fingerprint = String(input.fingerprint || '').trim();
     if (!fingerprint || fingerprint.length < 8) {
@@ -105,22 +162,36 @@ export class DeviceBanService {
     }
 
     const banned = await this.isBanned(fingerprint);
-    if (banned && ip) {
-      await this.banModel.updateOne(
-        { fingerprint, isActive: true },
-        { $set: { lastIp: ip, userAgent: input.userAgent?.slice(0, 500) }, $addToSet: { ipHistory: ip } },
-      );
+    if (banned) {
+      await this.recordAttempt({
+        fingerprint,
+        ip,
+        userAgent: input.userAgent,
+        path: input.path || '/devices/check',
+        source: 'check',
+        meta: input.meta,
+      });
     }
 
     return { banned, fingerprint, visitId: visit._id };
   }
 
   async listBans() {
-    return this.banModel.find().sort({ bannedAt: -1, createdAt: -1 }).lean();
+    return this.banModel.find().sort({ lastAttemptAt: -1, bannedAt: -1, createdAt: -1 }).lean();
   }
 
   async listVisits(limit = 100) {
     return this.visitModel.find().sort({ lastSeenAt: -1 }).limit(Math.min(limit, 300)).lean();
+  }
+
+  async listAttempts(limit = 200, fingerprint?: string) {
+    const filter: Record<string, unknown> = {};
+    if (fingerprint) filter.fingerprint = fingerprint;
+    return this.attemptModel
+      .find(filter)
+      .sort({ attemptedAt: -1 })
+      .limit(Math.min(limit, 500))
+      .lean();
   }
 
   async banDevice(input: {
@@ -150,6 +221,10 @@ export class DeviceBanService {
         meta: input.meta || visit?.meta || {},
         bannedAt: new Date(),
         revokedAt: null,
+        attemptCount: 0,
+        lastAttemptAt: null,
+        lastAttemptIp: null,
+        lastAttemptPath: null,
       },
     };
     if (input.bannedBy) {
@@ -176,6 +251,12 @@ export class DeviceBanService {
     await ban.save();
     this.cacheSet(ban.fingerprint, false);
     return ban;
+  }
+
+  async revokeByFingerprint(fingerprint: string) {
+    const ban = await this.banModel.findOne({ fingerprint: fingerprint.trim(), isActive: true });
+    if (!ban) throw new NotFoundException('لا يوجد حظر نشط لهذا الجهاز');
+    return this.revokeBan(String(ban._id));
   }
 
   async banFromVisit(visitId: string, reason: string, admin: { id?: string; email?: string }) {

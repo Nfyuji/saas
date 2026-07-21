@@ -3,6 +3,8 @@ import { APP_GUARD } from '@nestjs/core';
 import { MongooseModule } from '@nestjs/mongoose';
 import {
   DeviceBan,
+  DeviceBanAttempt,
+  DeviceBanAttemptSchema,
   DeviceBanSchema,
   DeviceVisit,
   DeviceVisitSchema,
@@ -19,6 +21,7 @@ import {
     MongooseModule.forFeature([
       { name: DeviceBan.name, schema: DeviceBanSchema },
       { name: DeviceVisit.name, schema: DeviceVisitSchema },
+      { name: DeviceBanAttempt.name, schema: DeviceBanAttemptSchema },
     ]),
   ],
   controllers: [DeviceBanPublicController, DeviceBanAdminController],

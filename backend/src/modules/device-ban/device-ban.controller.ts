@@ -89,6 +89,11 @@ export class DeviceBanAdminController {
     return this.deviceBanService.listVisits(limit ? Number(limit) : 100);
   }
 
+  @Get('attempts')
+  listAttempts(@Query('limit') limit?: string, @Query('fingerprint') fingerprint?: string) {
+    return this.deviceBanService.listAttempts(limit ? Number(limit) : 200, fingerprint);
+  }
+
   @Post()
   ban(
     @Body() dto: BanDto,
@@ -117,6 +122,12 @@ export class DeviceBanAdminController {
       id: adminId,
       email,
     });
+  }
+
+  /** رفع الحظر ببصمة الجهاز — يجب أن يكون قبل :id/revoke */
+  @Put('by-fingerprint/:fingerprint/revoke')
+  revokeByFingerprint(@Param('fingerprint') fingerprint: string) {
+    return this.deviceBanService.revokeByFingerprint(decodeURIComponent(fingerprint));
   }
 
   @Put(':id/revoke')

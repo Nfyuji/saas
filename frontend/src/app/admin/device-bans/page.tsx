@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Ban, ShieldOff, Smartphone } from 'lucide-react';
+import { Ban, ShieldOff, Smartphone, Activity, Unlock } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui';
 
@@ -16,7 +16,10 @@ interface DeviceBan {
   ipHistory?: string[];
   bannedAt?: string;
   revokedAt?: string;
-  createdAt?: string;
+  attemptCount?: number;
+  lastAttemptAt?: string;
+  lastAttemptIp?: string;
+  lastAttemptPath?: string;
 }
 
 interface DeviceVisit {
@@ -27,13 +30,23 @@ interface DeviceVisit {
   lastUserEmail?: string;
   visitCount?: number;
   lastSeenAt?: string;
-  meta?: Record<string, unknown>;
+}
+
+interface DeviceAttempt {
+  _id: string;
+  fingerprint: string;
+  ip?: string;
+  userAgent?: string;
+  path?: string;
+  source?: string;
+  attemptedAt?: string;
 }
 
 export default function AdminDeviceBansPage() {
   const [bans, setBans] = useState<DeviceBan[]>([]);
   const [visits, setVisits] = useState<DeviceVisit[]>([]);
-  const [tab, setTab] = useState<'bans' | 'visits'>('visits');
+  const [attempts, setAttempts] = useState<DeviceAttempt[]>([]);
+  const [tab, setTab] = useState<'visits' | 'bans' | 'attempts'>('bans');
   const [manualFp, setManualFp] = useState('');
   const [myFp, setMyFp] = useState('');
   const [reason, setReason] = useState('حظر نهائي من الأدمن');
@@ -47,12 +60,14 @@ export default function AdminDeviceBansPage() {
   const load = async () => {
     setLoading(true);
     try {
-      const [b, v] = await Promise.all([
+      const [b, v, a] = await Promise.all([
         api.get<DeviceBan[]>('/platform-admin/device-bans'),
         api.get<DeviceVisit[]>('/platform-admin/device-bans/visits?limit=150'),
+        api.get<DeviceAttempt[]>('/platform-admin/device-bans/attempts?limit=200'),
       ]);
       setBans(b);
       setVisits(v);
+      setAttempts(a);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'فشل التحميل');
     } finally {
@@ -62,6 +77,8 @@ export default function AdminDeviceBansPage() {
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
   }, []);
 
   const banFingerprint = async (fingerprint: string, customReason?: string) => {
@@ -96,32 +113,53 @@ export default function AdminDeviceBansPage() {
     }
   };
 
-  const revoke = async (id: string) => {
-    if (!confirm('إلغاء الحظر عن هذا الجهاز؟')) return;
+  const unban = async (id: string, label?: string) => {
+    if (!confirm(`رفع الحظر${label ? ` عن ${label}` : ''}؟ سيتمكن الجهاز من الدخول مجدداً.`)) return;
+    setMessage('');
     try {
       await api.put(`/platform-admin/device-bans/${id}/revoke`);
-      setMessage('تم إلغاء الحظر');
+      setMessage('تم رفع الحظر بنجاح');
       await load();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'فشل إلغاء الحظر');
+      setMessage(err instanceof Error ? err.message : 'فشل رفع الحظر');
     }
   };
 
   const isError = /فشل|خطأ|غير/i.test(message);
-  const bannedSet = new Set(bans.filter((b) => b.isActive).map((b) => b.fingerprint));
+  const activeBans = bans.filter((b) => b.isActive);
+  const bannedMap = new Map(activeBans.map((b) => [b.fingerprint, b]));
+  const attemptTotal = activeBans.reduce((s, b) => s + (b.attemptCount || 0), 0);
 
   return (
     <div className="page-wrap space-y-5">
       <PageHeader
         title="حظر الأجهزة"
-        subtitle="احظر أي جهاز ببصمته — يبقى ممنوعاً حتى لو غيّر VPN أو الشبكة"
+        subtitle="احظر، ارفع الحظر، وتابع من يحاول الدخول بعد الحظر"
         eyebrow="Device Ban"
       />
 
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="surface-card p-4">
+          <p className="text-xs text-[var(--muted)] m-0">محظورون نشطون</p>
+          <p className="font-display font-black text-2xl text-[var(--orange-dark)] m-0 mt-1">
+            {activeBans.length}
+          </p>
+        </div>
+        <div className="surface-card p-4">
+          <p className="text-xs text-[var(--muted)] m-0">محاولات بعد الحظر</p>
+          <p className="font-display font-black text-2xl text-[var(--teal-dark)] m-0 mt-1">
+            {attemptTotal}
+          </p>
+        </div>
+        <div className="surface-card p-4">
+          <p className="text-xs text-[var(--muted)] m-0">أجهزة زارت الموقع</p>
+          <p className="font-display font-black text-2xl m-0 mt-1">{visits.length}</p>
+        </div>
+      </div>
+
       <div className="surface-card p-4 text-sm text-[var(--muted)] leading-7">
-        الحظر يعتمد على <strong className="text-[var(--teal-dark)]">بصمة المتصفح/الجهاز</strong> وليس IP
-        فقط. تغيير VPN لا يزيل الحظر. مسح بيانات المتصفح بالكامل أو جهاز مختلف قد يتجاوزه — وهذا حدّ تقني لأي
-        موقع ويب.
+        الحظر ببصمة الجهاز (ليس IP فقط) — تغيير VPN لا يكفي. من قائمة المحظورين اضغط{' '}
+        <strong className="text-[var(--teal-dark)]">رفع الحظر</strong> لإعادة السماح.
         {myFp ? (
           <p className="mt-2 mb-0 text-xs" dir="ltr">
             جهازك الحالي: <code className="text-[var(--teal-dark)]">{myFp}</code>
@@ -170,19 +208,27 @@ export default function AdminDeviceBansPage() {
       <div className="flex gap-2 flex-wrap">
         <button
           type="button"
-          className={tab === 'visits' ? 'btn-teal text-sm' : 'btn-ghost text-sm'}
-          onClick={() => setTab('visits')}
-        >
-          <Smartphone size={15} />
-          الأجهزة التي زارت الموقع
-        </button>
-        <button
-          type="button"
           className={tab === 'bans' ? 'btn-teal text-sm' : 'btn-ghost text-sm'}
           onClick={() => setTab('bans')}
         >
           <ShieldOff size={15} />
-          قائمة المحظورين ({bans.filter((b) => b.isActive).length})
+          المحظورون ({activeBans.length})
+        </button>
+        <button
+          type="button"
+          className={tab === 'attempts' ? 'btn-teal text-sm' : 'btn-ghost text-sm'}
+          onClick={() => setTab('attempts')}
+        >
+          <Activity size={15} />
+          محاولات الدخول ({attempts.length})
+        </button>
+        <button
+          type="button"
+          className={tab === 'visits' ? 'btn-teal text-sm' : 'btn-ghost text-sm'}
+          onClick={() => setTab('visits')}
+        >
+          <Smartphone size={15} />
+          كل الزيارات
         </button>
         <button type="button" className="btn-ghost text-sm" onClick={load}>
           تحديث
@@ -191,56 +237,7 @@ export default function AdminDeviceBansPage() {
 
       {loading ? (
         <p className="empty-state">جاري التحميل...</p>
-      ) : tab === 'visits' ? (
-        <div className="table-wrap">
-          {!visits.length ? (
-            <p className="empty-state">لا زيارات بعد — افتح الموقع من أي جهاز لتظهر هنا</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>البصمة</th>
-                  <th>آخر IP</th>
-                  <th>المستخدم</th>
-                  <th>الزيارات</th>
-                  <th>آخر ظهور</th>
-                  <th>إجراء</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visits.map((v) => (
-                  <tr key={v._id}>
-                    <td className="font-mono text-[11px] max-w-[140px] truncate" dir="ltr" title={v.fingerprint}>
-                      {v.fingerprint}
-                    </td>
-                    <td className="text-xs" dir="ltr">
-                      {v.lastIp || '—'}
-                    </td>
-                    <td className="text-xs">{v.lastUserEmail || 'زائر'}</td>
-                    <td>{v.visitCount || 1}</td>
-                    <td className="text-xs text-[var(--muted)]">
-                      {v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ar') : '—'}
-                    </td>
-                    <td>
-                      {bannedSet.has(v.fingerprint) ? (
-                        <span className="badge badge-off">محظور</span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="chip chip-orange text-xs"
-                          onClick={() => banVisit(v._id)}
-                        >
-                          حظر نهائي
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ) : (
+      ) : tab === 'bans' ? (
         <div className="table-wrap">
           {!bans.length ? (
             <p className="empty-state">لا أجهزة محظورة</p>
@@ -250,32 +247,44 @@ export default function AdminDeviceBansPage() {
                 <tr>
                   <th>البصمة</th>
                   <th>السبب</th>
+                  <th>محاولات بعد الحظر</th>
+                  <th>آخر محاولة</th>
                   <th>الحالة</th>
-                  <th>بواسطة</th>
-                  <th>تاريخ الحظر</th>
                   <th>إجراء</th>
                 </tr>
               </thead>
               <tbody>
                 {bans.map((b) => (
                   <tr key={b._id}>
-                    <td className="font-mono text-[11px] max-w-[140px] truncate" dir="ltr" title={b.fingerprint}>
+                    <td className="font-mono text-[11px] max-w-[120px] truncate" dir="ltr" title={b.fingerprint}>
                       {b.fingerprint}
                     </td>
                     <td className="text-sm">{b.reason || '—'}</td>
                     <td>
-                      <span className={`badge ${b.isActive ? 'badge-off' : 'badge-ok'}`}>
-                        {b.isActive ? 'نشط' : 'ملغى'}
-                      </span>
+                      <span className="font-bold text-[var(--orange-dark)]">{b.attemptCount || 0}</span>
+                      {b.lastAttemptIp ? (
+                        <span className="block text-[10px] text-[var(--muted)]" dir="ltr">
+                          {b.lastAttemptIp}
+                        </span>
+                      ) : null}
                     </td>
-                    <td className="text-xs">{b.bannedByEmail || '—'}</td>
                     <td className="text-xs text-[var(--muted)]">
-                      {b.bannedAt ? new Date(b.bannedAt).toLocaleString('ar') : '—'}
+                      {b.lastAttemptAt ? new Date(b.lastAttemptAt).toLocaleString('ar') : 'لا توجد'}
                     </td>
                     <td>
+                      <span className={`badge ${b.isActive ? 'badge-off' : 'badge-ok'}`}>
+                        {b.isActive ? 'محظور' : 'مرفوع'}
+                      </span>
+                    </td>
+                    <td className="space-x-1 space-x-reverse">
                       {b.isActive ? (
-                        <button type="button" className="chip chip-soft text-xs" onClick={() => revoke(b._id)}>
-                          إلغاء الحظر
+                        <button
+                          type="button"
+                          className="btn-teal text-xs !py-1.5 !px-3 inline-flex items-center gap-1"
+                          onClick={() => unban(b._id, b.fingerprint.slice(0, 12))}
+                        >
+                          <Unlock size={13} />
+                          رفع الحظر
                         </button>
                       ) : (
                         <button
@@ -289,6 +298,132 @@ export default function AdminDeviceBansPage() {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : tab === 'attempts' ? (
+        <div className="table-wrap">
+          {!attempts.length ? (
+            <p className="empty-state">
+              لا محاولات بعد — عندما يحاول جهاز محظور فتح الموقع أو استدعاء الـ API تظهر هنا فوراً
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>الوقت</th>
+                  <th>البصمة</th>
+                  <th>IP</th>
+                  <th>المصدر</th>
+                  <th>المسار</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attempts.map((a) => {
+                  const ban = bannedMap.get(a.fingerprint);
+                  return (
+                    <tr key={a._id}>
+                      <td className="text-xs text-[var(--muted)] whitespace-nowrap">
+                        {a.attemptedAt ? new Date(a.attemptedAt).toLocaleString('ar') : '—'}
+                      </td>
+                      <td
+                        className="font-mono text-[11px] max-w-[120px] truncate"
+                        dir="ltr"
+                        title={a.fingerprint}
+                      >
+                        {a.fingerprint}
+                      </td>
+                      <td className="text-xs" dir="ltr">
+                        {a.ip || '—'}
+                      </td>
+                      <td>
+                        <span className="badge badge-off">{a.source || 'check'}</span>
+                      </td>
+                      <td className="text-[11px] text-[var(--muted)] max-w-[140px] truncate" dir="ltr">
+                        {a.path || '—'}
+                      </td>
+                      <td>
+                        {ban ? (
+                          <button
+                            type="button"
+                            className="btn-teal text-xs !py-1.5 !px-3 inline-flex items-center gap-1"
+                            onClick={() => unban(ban._id)}
+                          >
+                            <Unlock size={13} />
+                            رفع الحظر
+                          </button>
+                        ) : (
+                          <span className="text-xs text-[var(--muted)]">مرفوع مسبقاً</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : (
+        <div className="table-wrap">
+          {!visits.length ? (
+            <p className="empty-state">لا زيارات بعد</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>البصمة</th>
+                  <th>آخر IP</th>
+                  <th>المستخدم</th>
+                  <th>الزيارات</th>
+                  <th>آخر ظهور</th>
+                  <th>إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visits.map((v) => {
+                  const ban = bannedMap.get(v.fingerprint);
+                  return (
+                    <tr key={v._id}>
+                      <td
+                        className="font-mono text-[11px] max-w-[140px] truncate"
+                        dir="ltr"
+                        title={v.fingerprint}
+                      >
+                        {v.fingerprint}
+                      </td>
+                      <td className="text-xs" dir="ltr">
+                        {v.lastIp || '—'}
+                      </td>
+                      <td className="text-xs">{v.lastUserEmail || 'زائر'}</td>
+                      <td>{v.visitCount || 1}</td>
+                      <td className="text-xs text-[var(--muted)]">
+                        {v.lastSeenAt ? new Date(v.lastSeenAt).toLocaleString('ar') : '—'}
+                      </td>
+                      <td>
+                        {ban ? (
+                          <button
+                            type="button"
+                            className="btn-teal text-xs !py-1.5 !px-3 inline-flex items-center gap-1"
+                            onClick={() => unban(ban._id)}
+                          >
+                            <Unlock size={13} />
+                            رفع الحظر
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="chip chip-orange text-xs"
+                            onClick={() => banVisit(v._id)}
+                          >
+                            حظر نهائي
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
