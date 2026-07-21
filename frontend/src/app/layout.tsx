@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import { Tajawal, Cairo } from 'next/font/google';
 import { AuthProvider } from '@/lib/auth';
 import { DeviceAccessGate } from '@/components/DeviceAccessGate';
+import { AppProviders } from '@/providers/app-providers';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import './globals.css';
 
 const tajawal = Tajawal({
@@ -32,9 +34,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ar" dir="rtl" className={`${tajawal.variable} ${cairo.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full antialiased" suppressHydrationWarning>
-        <AuthProvider>
-          <DeviceAccessGate>{children}</DeviceAccessGate>
-        </AuthProvider>
+        <AppProviders>
+          <AuthProvider>
+            <DeviceAccessGate>
+              <ErrorBoundary>{children}</ErrorBoundary>
+            </DeviceAccessGate>
+          </AuthProvider>
+        </AppProviders>
       </body>
     </html>
   );

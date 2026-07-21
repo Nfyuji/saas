@@ -1,22 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
 import { EmptyState, PageHeader } from '@/components/ui';
 import { Modal } from '@/components/modal';
-
-interface Customer {
-  _id: string;
-  name: string;
-  phone?: string;
-  email?: string;
-  status: string;
-  tags: string[];
-  totalMessages: number;
-  lastContactAt?: string;
-  notes?: string;
-}
+import { TableSkeleton } from '@/components/ui/skeleton';
+import { useDebouncedValue } from '@/utils/debounce';
+import { useCreateCustomer, useCustomers } from '@/hooks/useCustomers';
 
 const statusLabels: Record<string, string> = {
   lead: 'عميل محتمل',
@@ -35,45 +25,38 @@ const statusBadges: Record<string, string> = {
 };
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
-  const [loading, setLoading] = useState(true);
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', phone: '', email: '', status: 'lead', notes: '' });
 
-  const load = () => {
-    const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    if (status) params.set('status', status);
-    api.get<{ data: Customer[] }>(`/customers?${params}`)
-      .then((res) => setCustomers(res.data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  };
+  const { data: customers = [], isLoading, isFetching } = useCustomers({
+    search: debouncedSearch || undefined,
+    status: status || undefined,
+  });
+  const createCustomer = useCreateCustomer();
 
-  useEffect(() => { load(); }, [status]);
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await api.post('/customers', form);
-      setShowForm(false);
-      setForm({ name: '', phone: '', email: '', status: 'lead', notes: '' });
-      load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'فشل الإنشاء');
-    }
+    createCustomer.mutate(form, {
+      onSuccess: () => {
+        setShowForm(false);
+        setForm({ name: '', phone: '', email: '', status: 'lead', notes: '' });
+      },
+    });
   };
 
   return (
     <div className="page-wrap">
       <PageHeader
         title="العملاء (CRM)"
-        subtitle={`${customers.length} عميل · كل محادثة واتساب تُربط هنا`}
+        subtitle={`${customers.length} عميل · تحديث فوري بدون إعادة تحميل`}
         actions={
           <>
-            <Link href="/dashboard/inbox" className="btn-ghost text-sm">الرسائل</Link>
+            <Link href="/dashboard/inbox" className="btn-ghost text-sm">
+              الرسائل
+            </Link>
             <button type="button" onClick={() => setShowForm(true)} className="btn-orange text-sm">
               + إضافة عميل
             </button>
@@ -81,12 +64,11 @@ export default function CustomersPage() {
         }
       />
 
-      <div className="flex gap-3 mb-6 flex-wrap">
+      <div className="flex gap-3 mb-6 flex-wrap items-center">
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && load()}
-          placeholder="بحث بالاسم أو الرقم..."
+          placeholder="بحث حي بالاسم أو الرقم..."
           className="input-field flex-1 min-w-[min(100%,12rem)]"
         />
         <select
@@ -96,39 +78,79 @@ export default function CustomersPage() {
         >
           <option value="">كل الحالات</option>
           {Object.entries(statusLabels).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
+            <option key={k} value={k}>
+              {v}
+            </option>
           ))}
         </select>
-        <button type="button" onClick={load} className="btn-ghost">
-          بحث
-        </button>
+        {isFetching && !isLoading ? (
+          <span className="text-xs text-[var(--muted)]">جاري التحديث...</span>
+        ) : null}
       </div>
 
-      <Modal open={showForm} onClose={() => setShowForm(false)}>
-        <form onSubmit={handleCreate} className="modal-panel surface-card p-4 sm:p-6 space-y-4" style={{ width: 'min(100%, 28rem)' }}>
+      <Modal open={showForm} onClose={() => !createCustomer.isPending && setShowForm(false)}>
+        <form
+          onSubmit={handleCreate}
+          className="modal-panel surface-card p-4 sm:p-6 space-y-4"
+          style={{ width: 'min(100%, 28rem)' }}
+        >
           <h2 className="font-bold text-lg">إضافة عميل جديد</h2>
-          <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-            placeholder="الاسم" className="input-field" />
-          <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            placeholder="رقم واتساب (9665...)" className="input-field" dir="ltr" />
-          <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-            placeholder="البريد" className="input-field" dir="ltr" />
-          <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-            className="input-field">
+          <input
+            required
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            placeholder="الاسم"
+            className="input-field"
+          />
+          <input
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            placeholder="رقم واتساب (9665...)"
+            className="input-field"
+            dir="ltr"
+          />
+          <input
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            placeholder="البريد"
+            className="input-field"
+            dir="ltr"
+          />
+          <select
+            value={form.status}
+            onChange={(e) => setForm({ ...form, status: e.target.value })}
+            className="input-field"
+          >
             {Object.entries(statusLabels).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
+              <option key={k} value={k}>
+                {v}
+              </option>
             ))}
           </select>
           <div className="flex gap-3 form-actions">
-            <button type="submit" className="btn-teal flex-1 justify-center">حفظ</button>
-            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost flex-1 justify-center">إلغاء</button>
+            <button
+              type="submit"
+              disabled={createCustomer.isPending}
+              className="btn-teal flex-1 justify-center disabled:opacity-50"
+            >
+              {createCustomer.isPending ? 'جاري الحفظ...' : 'حفظ'}
+            </button>
+            <button
+              type="button"
+              disabled={createCustomer.isPending}
+              onClick={() => setShowForm(false)}
+              className="btn-ghost flex-1 justify-center"
+            >
+              إلغاء
+            </button>
           </div>
         </form>
       </Modal>
 
       <div className="table-wrap">
-        {loading ? (
-          <p className="empty-state">جاري التحميل...</p>
+        {isLoading ? (
+          <TableSkeleton rows={6} />
         ) : customers.length === 0 ? (
           <EmptyState
             title="لا عملاء بعد"
@@ -154,9 +176,7 @@ export default function CustomersPage() {
                 <tr key={c._id} className="cursor-pointer hover:bg-[var(--teal-soft)]/30 transition">
                   <td>
                     <Link href={`/dashboard/customers/${c._id}`} className="flex items-center gap-3 min-w-0">
-                      <div className="icon-badge teal text-xs font-bold shrink-0">
-                        {c.name.charAt(0)}
-                      </div>
+                      <div className="icon-badge teal text-xs font-bold shrink-0">{c.name.charAt(0)}</div>
                       <div className="min-w-0">
                         <p className="font-medium truncate">{c.name}</p>
                         {c.email && <p className="text-xs text-[var(--muted)] truncate">{c.email}</p>}
@@ -176,7 +196,7 @@ export default function CustomersPage() {
                     </Link>
                   </td>
                   <td>
-                    <Link href={`/dashboard/customers/${c._id}`}>{c.totalMessages}</Link>
+                    <Link href={`/dashboard/customers/${c._id}`}>{c.totalMessages || 0}</Link>
                   </td>
                   <td className="text-[var(--muted)]">
                     <Link href={`/dashboard/customers/${c._id}`}>
