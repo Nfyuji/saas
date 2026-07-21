@@ -27,6 +27,7 @@ import { OutboundWebhooksModule } from './modules/outbound-webhooks/outbound-web
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { IntelligenceModule } from './modules/intelligence/intelligence.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DeviceBanModule } from './modules/device-ban/device-ban.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
         return { uri };
       },
     }),
+    DeviceBanModule,
     AuthModule,
     UsersModule,
     CompaniesModule,
