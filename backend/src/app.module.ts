@@ -33,9 +33,15 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     ConfigModule.forRoot({ isGlobal: true }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        uri: config.get<string>('MONGODB_URI', 'mongodb://localhost:27017/businessos'),
-      }),
+      useFactory: (config: ConfigService) => {
+        const uri = config.get<string>('MONGODB_URI');
+        if (!uri) {
+          throw new Error(
+            'MONGODB_URI is missing. Add it in Render → Environment (Atlas connection string).',
+          );
+        }
+        return { uri };
+      },
     }),
     AuthModule,
     UsersModule,
