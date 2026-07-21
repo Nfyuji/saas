@@ -1,8 +1,13 @@
+import 'dotenv/config';
 import mongoose from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 
 async function seed() {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/businessos';
+  console.log(
+    'Seeding database:',
+    uri.replace(/\/\/([^:]+):([^@]+)@/, '//***:***@'),
+  );
   await mongoose.connect(uri);
   const db = mongoose.connection.db!;
 

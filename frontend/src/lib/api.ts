@@ -21,12 +21,15 @@ class ApiClient {
     const res = await fetch(`${API_URL}${path}`, { ...options, headers });
 
     if (res.status === 401) {
-      if (typeof window !== 'undefined') {
+      const data = await res.json().catch(() => ({}));
+      const msg = data.message || 'غير مصرح';
+      const isLogin = path.includes('/auth/login') || path.includes('/auth/register');
+      if (!isLogin && typeof window !== 'undefined') {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/login';
       }
-      throw new Error('غير مصرح');
+      throw new Error(Array.isArray(msg) ? msg.join(' · ') : String(msg));
     }
 
     const data = await res.json().catch(() => ({}));
