@@ -48,9 +48,6 @@ export default function LoginPage() {
           <div className="pill pill-teal mx-auto mb-4">◆ AI</div>
           <h1 className="font-display text-2xl font-black text-[var(--teal-dark)] mb-2">{platformName}</h1>
           <p className="text-[var(--muted)] text-sm">سجّل دخولك إلى لوحة التشغيل</p>
-          <p className="text-xs text-[var(--muted)] mt-2">
-            أدمن: admin@businessos.ai · شركة: demo@businessos.ai
-          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

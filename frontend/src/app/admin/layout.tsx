@@ -13,6 +13,7 @@ import {
   Shield,
   Activity,
   Settings,
+  UserRound,
   Menu,
   X,
   LogOut,
@@ -29,6 +30,7 @@ const nav: Array<{ href: string; label: string; icon: ElementType }> = [
   { href: '/admin/staff', label: 'أدمن المنصة', icon: Shield },
   { href: '/admin/activity', label: 'النشاط', icon: Activity },
   { href: '/admin/settings', label: 'إعدادات المنصة', icon: Settings },
+  { href: '/admin/profile', label: 'الملف الشخصي', icon: UserRound },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -135,15 +137,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
 
         <div className="p-4 border-t border-[var(--border)]">
-          <div className="flex items-center gap-3 mb-3 min-w-0">
+          <Link
+            href="/admin/profile"
+            className="flex items-center gap-3 mb-3 min-w-0 no-underline text-inherit rounded-2xl hover:bg-[var(--teal-soft)]/50 p-1.5 -m-1.5 transition"
+          >
             <div className="w-9 h-9 rounded-full bg-[var(--teal)] flex items-center justify-center text-white text-sm font-bold shrink-0">
               {user.name.charAt(0)}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{user.name}</p>
-              <p className="text-xs text-[var(--muted)] truncate">{user.role}</p>
+              <p className="text-sm font-bold truncate m-0">{user.name}</p>
+              <p className="text-xs text-[var(--muted)] truncate m-0">الملف الشخصي</p>
             </div>
-          </div>
+          </Link>
           <button
             type="button"
             onClick={logout}
